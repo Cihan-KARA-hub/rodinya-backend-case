@@ -1,9 +1,12 @@
 import {
   Controller,
   Get,
+  Param,
   ParseFilePipe,
   Post,
   Query,
+  Res,
+  StreamableFile,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -14,17 +17,52 @@ import {
   ApiBody,
   ApiConsumes,
   ApiCreatedResponse,
+  ApiForbiddenResponse,
+  ApiNotFoundResponse,
   ApiOkResponse,
+  ApiParam,
   ApiPayloadTooLargeResponse,
+  ApiProduces,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
+import { Types } from 'mongoose';
 import type { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { MediaPageDto, MediaResponseDto } from './dto/media-response.dto';
 import { PaginationQueryDto } from './dto/pagination-query.dto';
 import { MediaService } from './media.service';
 import { JpegFileValidator } from './validators/jpeg-file.validator';
+
+/**
+ * Swagger docs shared by every `/media/:id...` route. `type: String` is needed:
+ * the handler param is typed Types.ObjectId (what the pipe returns), and
+ * without it Swagger documents an object, which Swagger UI shows as a large
+ * empty JSON box instead of a plain text field.
+ */
+const ApiMediaId = () =>
+  ApiParam({
+    name: 'id',
+    type: String,
+    description:
+      'Media id: the `id` returned by upload or /media/my (24 hex characters)',
+    example: '6706f1c2a4b5e8d9f0123456',
+  });
+
+/**
+ * Sent with every download. The file is only ever a JPEG to save, never a page:
+ * nosniff stops a browser from treating a JPEG/HTML polyglot as HTML, and the
+ * CSP sandbox keeps any script in it from running if it is opened anyway.
+ */
+const DOWNLOAD_HEADERS = {
+  'Content-Type': 'image/jpeg',
+  'X-Content-Type-Options': 'nosniff',
+  'Content-Security-Policy': "default-src 'none'; sandbox",
+  // Access-controlled content: no shared/proxy caching, nothing kept on disk.
+  'Cache-Control': 'private, no-store',
+};
 
 @ApiTags('media')
 @ApiBearerAuth()
@@ -73,6 +111,8 @@ export class MediaController {
     return MediaResponseDto.from(media, user);
   }
 
+  // Must stay declared before the ':id' routes, or '/media/my' would match ':id'
+  // and be rejected by ParseObjectIdPipe as an invalid id.
   @Get('my')
   @ApiOkResponse({
     type: MediaPageDto,
@@ -95,5 +135,51 @@ export class MediaController {
       total,
       totalPages: Math.ceil(total / limit),
     };
+  }
+
+  @Get(':id')
+  @ApiMediaId()
+  @ApiOkResponse({ type: MediaResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid id' })
+  @ApiForbiddenResponse({
+    description: 'Neither the owner nor an allowed user',
+  })
+  @ApiNotFoundResponse({ description: 'Media not found' })
+  async findOne(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @CurrentUser() user: AuthUser,
+  ): Promise<MediaResponseDto> {
+    const media = await this.mediaService.findForViewer(id, user.id);
+    return MediaResponseDto.from(media, user);
+  }
+
+  @Get(':id/download')
+  @ApiMediaId()
+  @ApiProduces('image/jpeg')
+  @ApiOkResponse({
+    description:
+      'The original JPEG as an attachment, named after the original file',
+    schema: { type: 'string', format: 'binary' },
+  })
+  @ApiBadRequestResponse({ description: 'Invalid id' })
+  @ApiForbiddenResponse({
+    description: 'Neither the owner nor an allowed user',
+  })
+  @ApiNotFoundResponse({ description: 'Media (or its file) not found' })
+  async download(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @CurrentUser() user: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const media = await this.mediaService.findForViewer(id, user.id);
+    const { stream, size } = await this.mediaService.openFile(media);
+
+    // Express builds an RFC 6266 Content-Disposition: an ASCII fallback plus
+    // filename*=UTF-8''... for names like "fotoğraf.jpg", with quotes and
+    // control characters escaped. It also guesses Content-Type from the name,
+    // which DOWNLOAD_HEADERS then overrides: the bytes are always a JPEG.
+    res.attachment(media.fileName);
+    res.set(DOWNLOAD_HEADERS);
+    return new StreamableFile(stream, { length: size });
   }
 }

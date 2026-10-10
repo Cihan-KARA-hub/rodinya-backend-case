@@ -70,25 +70,26 @@ describe('MediaStorageService', () => {
     });
   });
 
-  describe('openReadStream', () => {
-    it('streams the stored bytes back', async () => {
+  describe('open', () => {
+    it('streams the stored bytes back, with their size', async () => {
       const relativePath = await storage.save(userId, jpeg);
 
-      const stream = await storage.openReadStream(relativePath);
+      const { stream, size } = await storage.open(relativePath);
 
+      expect(size).toBe(jpeg.length);
       await expect(readAll(stream)).resolves.toEqual(jpeg);
     });
 
     it('rejects with ENOENT when the file is gone', async () => {
-      await expect(
-        storage.openReadStream(`${userId}/missing.jpg`),
-      ).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(storage.open(`${userId}/missing.jpg`)).rejects.toMatchObject(
+        { code: 'ENOENT' },
+      );
     });
 
     it.each(['../../secret.txt', '..', `${userId}/../../x.jpg`])(
       'refuses a path that escapes UPLOAD_DIR (%s)',
       async (path) => {
-        await expect(storage.openReadStream(path)).rejects.toThrow(
+        await expect(storage.open(path)).rejects.toThrow(
           'escapes the upload directory',
         );
       },

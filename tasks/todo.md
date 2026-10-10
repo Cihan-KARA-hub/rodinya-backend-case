@@ -29,14 +29,14 @@ Plan: [`plan.md`](plan.md) · Spec: [`SPEC.md`](../SPEC.md)
 ## Faz 2: Medya Çekirdeği
 
 - [x] **T4: Upload + /media/my**
-  - Kabul: Media şeması (`ownerId`, `allowedUserIds` index'li). `MediaStorageService` (`<UPLOAD_DIR>/<userId>/<uuid>.jpg` yazar, stream açar, siler, `UPLOAD_DIR`'i açılışta oluşturur). Dosya bellekte doğrulanır, sonra diske yazılır; DB kaydı başarısızsa dosya silinir. Upload → 201. PNG / sahte uzantılı dosya (magic byte) → 400, dosya yok → 400, >5MB → 413. Dosya adı UTF-8 okunur ve temizlenir (A9). `/media/my` sadece sahibin kayıtlarını, en yeni en üstte ve sayfalı döndürür (`{ items, page, limit, total, totalPages }`, geçersiz `page`/`limit` → 400). Yanıtta `filePath` yok; `allowedUserIds` sahip ve admin'e görünür.
+  - Kabul: Media şeması (`ownerId`, `allowedUserIds` index'li). `MediaStorageService` (`<UPLOAD_DIR>/<userId>/<uuid>.jpg` yazar, stream açar, siler, `UPLOAD_DIR`'i açılışta oluşturur). Dosya bellekte doğrulanır, sonra diske yazılır; DB kaydı başarısızsa dosya silinir. Upload → 201. PNG / sahte uzantılı dosya (magic byte) → 400, dosya yok → 400, >5MB → 413. Dosya adı UTF-8 okunur ve temizlenir (A9). `/media/my` sadece sahibin kayıtlarını, en yeni en üstte ve sayfalı döndürür (`{ items, page, limit, total, totalPages }`, geçersiz `page`/`limit` → 400). Yanıtta `filePath` yok; `allowedUserIds` yalnızca sahibe görünür (T5'te A3 düzeltmesiyle).
   - Doğrula: unit (JPEG doğrulayıcı, dosya adı temizleyici, storage) + e2e (jpeg fixture, png fixture, 5MB+1 buffer, Türkçe dosya adı, sayfalama)
   - Dosyalar: `src/media/schemas/*`, `src/media/media-storage.service.ts`, `src/media/media.service.ts`, `src/media/media.controller.ts`, `src/media/validators/jpeg-file.validator.ts`, `src/media/utils/sanitize-file-name.ts`, `src/media/dto/*`, `test/media.e2e-spec.ts`, `test/fixtures/*`, `SPEC.md`
 
-- [ ] **T5: Erişim guard'ı + detay + indirme**
-  - Kabul: `ParseObjectIdPipe` (bozuk id → 400). `MediaAccessGuard` + `@OwnerOnly()` metadata: 404 / 403 / geçiş (sahip, izinli, admin). `GET /media/:id` meta döner (`allowedUserIds` yalnızca sahibe). `/download` `StreamableFile` döner; `Content-Type: image/jpeg`, `Content-Disposition: attachment; filename="<orijinal>"`, byte'lar orijinalle aynı. `/uploads/<dosya>` → 404.
-  - Doğrula: guard unit testleri + e2e (A yükler, B → 403)
-  - Dosyalar: `src/common/pipes/parse-object-id.pipe.ts`, `src/media/guards/*`, `src/media/decorators/owner-only.decorator.ts`, `src/media/media.controller.ts`, `test/media.e2e-spec.ts`
+- [x] **T5: Erişim kontrolü + detay + indirme**
+  - Kabul: `ParseObjectIdPipe`: `:id` 24 haneli hex değilse → 400, geçerliyse `Types.ObjectId`'ye çevirir. Erişim kuralı `MediaService`'te (guard yok): kayıt yok → 404, sahip ya da izinli değil → 403 (admin dahil, A3). `GET /media/my` route'u `:id`'den önce tanımlı. `GET /media/:id` meta döner (`allowedUserIds` yalnızca sahibe). `/download` stream döner: `Content-Type: image/jpeg`, `Content-Length`, `Content-Disposition: attachment` (RFC 6266, Türkçe ad), `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`, `Cache-Control: private, no-store`; byte'lar orijinalle aynı. Kayıt var ama dosya diskte yok → 404 + hata logu. `/uploads/<dosya>` → 404.
+  - Doğrula: unit (`ParseObjectIdPipe`, `MediaService.findForViewer`) + e2e (A yükler, B → 403, admin → 403, indirme byte'ları ve başlıkları)
+  - Dosyalar: `src/common/pipes/parse-object-id.pipe.ts`, `src/common/utils/object-id.ts`, `src/media/media.service.ts`, `src/media/media.controller.ts`, `src/media/dto/media-response.dto.ts`, `test/media.e2e-spec.ts`, `SPEC.md`
 
 - [ ] **T6: Silme + izin yönetimi**
   - Kabul: `DELETE` → 204; kayıt ve dosya siliniyor, izinli kullanıcı silmeye çalışırsa → 403. `GET /permissions` sadece sahip. `POST /permissions {userId, action}`: `add` idempotent, `remove` çalışıyor. Hedef kullanıcı yok → 404, kendine izin → 400, geçersiz action → 400. İzin eklenince B indirebiliyor, kaldırılınca → 403.
@@ -48,8 +48,8 @@ Plan: [`plan.md`](plan.md) · Spec: [`SPEC.md`](../SPEC.md)
 ## Faz 3: Ekstralar
 
 - [ ] **T7: Admin**
-  - Kabul: `npm run seed:admin` `ADMIN_EMAIL`/`ADMIN_PASSWORD` ile admin oluşturuyor ya da var olan kaydı güncelliyor (idempotent). Admin başkasının medyasını görüyor, indiriyor ve siliyor; permissions'a erişirse → 403. Token payload'ında `role` var.
-  - Doğrula: e2e (admin senaryosu), script'i yerelde bir kez çalıştırma
+  - Kabul: `npm run seed:admin` `ADMIN_EMAIL`/`ADMIN_PASSWORD` ile admin oluşturuyor ya da var olan kaydı güncelliyor (idempotent). Admin'in medya üzerinde global yetkisi yok (A3): sahip ya da izinli değilse başkasının medyasını görmeye, indirmeye, silmeye ve permissions'a erişmeye çalışınca → 403. Token payload'ında `role` var.
+  - Doğrula: e2e (admin → 403 senaryosu), script'i yerelde bir kez çalıştırma
   - Dosyalar: `src/database/seeds/seed-admin.ts`, `package.json`, `test/admin.e2e-spec.ts`
 
 - [ ] **T8: Rate limiting**
@@ -73,6 +73,7 @@ Plan: [`plan.md`](plan.md) · Spec: [`SPEC.md`](../SPEC.md)
 
 - [ ] **T11: README + son doğrulama**
   - Kabul: README'de kurulum (yerel / Docker / Atlas), env tablosu, endpoint tablosu, cURL örnekleri (PNG notu dahil) ve tasarım kararları (A1–A18) var. `build`, `lint`, `test`, `test:e2e`, `test:cov` hepsi geçiyor.
+  - README'de **"Güvenlik / bilinen sınırlamalar"** bölümü: yükleme kontrolünün kapsamı (mimetype + ilk 3 byte) ve kapsamadıkları (polyglot, sona eklenmiş içerik, görüntüleyici açıkları, EXIF/GPS); alınmış önlemler (statik servis yok, UUID adlar, sunucu görüntüyü işlemiyor, 5MB, erişim kontrolü, indirme başlıkları); production önerileri (`sharp` ile yeniden kodlama, ClamAV); 403/404 ayrımının id varlığını açığa çıkarması (A6).
   - Doğrula: temiz bir klonla sıfırdan kurulum
   - Dosyalar: `README.md`, `.env.example`
 
