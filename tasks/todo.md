@@ -66,10 +66,10 @@ Plan: [`plan.md`](plan.md) · Spec: [`SPEC.md`](../SPEC.md)
 
 ## Faz 4: Docker ve Teslim
 
-- [ ] **T10: Docker**
-  - Kabul: Multi-stage `Dockerfile` (`node:22-alpine`; build stage → runtime stage, `npm ci --omit=dev`, `USER node`, `HEALTHCHECK`). `.dockerignore` hazır. `docker-compose.yml` iki servis içeriyor: `api` (env_file, `uploads` volume, `depends_on: mongo` healthy durumda) ve `mongo:7` (`mongo-data` volume, healthcheck).
-  - Doğrula: `docker compose up --build -d` → `/health` 200, upload/download çalışıyor, `docker compose restart api` sonrası dosya hâlâ indirilebiliyor
-  - Dosyalar: `Dockerfile`, `.dockerignore`, `docker-compose.yml`, `.env.example`
+- [x] **T10: Docker**
+  - Kabul: Lock dosyası Linux'ta `npm ci` ile kurulabiliyor (`@emnapi/core`/`runtime` açık devDependency). Multi-stage `Dockerfile` (`node:22-alpine`; build → prod-deps (`npm ci --omit=dev`) → runtime, `USER node`, `HEALTHCHECK`, `CMD node dist/main.js`). `.dockerignore` (`.env`, `node_modules`, `uploads` imaja girmez). `docker-compose.yml`: `api` (env_file, `MONGO_URI` ← `DOCKER_MONGO_URI` varsayılan compose mongo, `uploads` volume, `API_PORT`, `init: true`, `depends_on: mongo` healthy) ve `mongo:7` (`mongo-data` volume, healthcheck, host'a port yok).
+  - Doğrula: `docker compose up --build -d` → `/health` 200, upload/download çalışıyor, `docker compose restart api` sonrası dosya hâlâ indirilebiliyor, konteynerde `seed:admin` çalışıyor
+  - Dosyalar: `Dockerfile`, `.dockerignore`, `docker-compose.yml`, `.env.example`, `package.json`, `package-lock.json`, `SPEC.md`
 
 - [ ] **T11: README + son doğrulama**
   - Kabul: README'de kurulum (yerel / Docker / Atlas), env tablosu, endpoint tablosu, cURL örnekleri (PNG notu dahil) ve tasarım kararları (A1–A18) var. `build`, `lint`, `test`, `test:e2e`, `test:cov` hepsi geçiyor.
