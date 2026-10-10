@@ -225,4 +225,4 @@ export class MediaAccessGuard implements CanActivate {
 ## Açık Sorular
 
 Yok. Bütün sorular 2026-10-10'da yanıtlandı (A1, A3, A16, A17, branch: `development`).
-Repo: `git@github.com:Cihan-KARA-hub/rodinya-backend-case.git`. Git/GitHub akışı için bkz. [`tasks/plan.md`](tasks/plan.md#git-ve-github-akışı).
+Repo: `https://github.com/Cihan-KARA-hub/rodinya-backend-case.git`. Git/GitHub akışı için bkz. [`tasks/plan.md`](tasks/plan.md#git-ve-github-akışı).

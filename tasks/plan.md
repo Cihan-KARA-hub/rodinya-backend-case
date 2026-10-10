@@ -59,7 +59,7 @@ Her kontrol noktasında durup size özet vereceğim.
 
 ## Git ve GitHub Akışı
 
-Repo: `git@github.com:Cihan-KARA-hub/rodinya-backend-case.git` (public).
+Repo: `https://github.com/Cihan-KARA-hub/rodinya-backend-case.git` (public).
 
 ```
 main            ← teslim edilen sürüm; yalnızca kontrol noktalarında release PR'ı ile güncellenir
