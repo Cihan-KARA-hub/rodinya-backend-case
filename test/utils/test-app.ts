@@ -1,10 +1,12 @@
 import { INestApplication } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { mkdtemp, rm } from 'fs/promises';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { App } from 'supertest/types';
+import { envValidationSchema } from '../../src/config/env.validation';
 
 export interface TestApp {
   app: INestApplication<App>;
@@ -28,6 +30,12 @@ export async function createTestApp(
     JWT_ACCESS_SECRET: 'test-access-secret',
     JWT_REFRESH_SECRET: 'test-refresh-secret',
     UPLOAD_DIR: uploadDir,
+    // Suites fire many requests from one IP; only throttle.e2e-spec.ts tests
+    // the limits, by passing low values in `env`. Set every time, since
+    // process.env outlives a single suite.
+    THROTTLE_LIMIT: '100000',
+    THROTTLE_AUTH_LIMIT: '100000',
+    TRUST_PROXY: 'false',
     ...env,
   });
 
@@ -45,11 +53,25 @@ export async function createTestApp(
     typeof import('../../src/app.setup')
   >('../../src/app.setup');
 
+  // ConfigModule reads the env once, when AppModule is first loaded, and Jest
+  // caches that module for the whole suite. A second app in the same suite
+  // would get the first app's values (e.g. a MONGO_URI that is already
+  // stopped), so each app gets a ConfigService built from the current env,
+  // validated by the same schema.
+  const validated = envValidationSchema.validate(process.env, {
+    allowUnknown: true,
+    abortEarly: false,
+  });
+  if (validated.error) throw validated.error;
+
   let app: INestApplication<App>;
   try {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(ConfigService)
+      .useValue(new ConfigService(validated.value))
+      .compile();
     app = moduleRef.createNestApplication<INestApplication<App>>();
     configureApp(app);
     await app.init();

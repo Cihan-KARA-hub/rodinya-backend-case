@@ -52,10 +52,10 @@ Plan: [`plan.md`](plan.md) · Spec: [`SPEC.md`](../SPEC.md)
   - Doğrula: e2e (admin → 403 senaryosu), script'i yerelde bir kez çalıştırma
   - Dosyalar: `src/database/seeds/seed-admin.ts`, `package.json`, `test/admin.e2e-spec.ts`
 
-- [ ] **T8: Rate limiting**
-  - Kabul: `ThrottlerModule` env'den yapılandırılıyor, global `ThrottlerGuard` aktif. Auth endpoint'lerinde sıkı limit var, `/health` `@SkipThrottle()` ile muaf. Limit aşılınca 429 dönüyor. `TRUST_PROXY=true` ise `app.set('trust proxy', 1)` uygulanıyor.
-  - Doğrula: düşük limitli e2e testi (11. login isteği → 429)
-  - Dosyalar: `src/app.module.ts`, `src/main.ts`, `src/auth/auth.controller.ts`, `src/health/health.controller.ts`, `test/throttle.e2e-spec.ts`
+- [x] **T8: Rate limiting**
+  - Kabul: `ThrottlerModule` env'den yapılandırılıyor; global `AppThrottlerGuard`, `JwtAuthGuard`'dan önce çalışıyor (token'sız istek de sayılır, 429 401'den önce). Sayaç IP + endpoint başına (A16). `@AuthThrottle()` ile login/register/refresh'te ayrı ve sıkı sayaç; `/health` muaf. 429 gövdesi `{ statusCode, message, error }`, standart `Retry-After` başlığı var. `TRUST_PROXY=true` ise `trust proxy = 1`.
+  - Doğrula: düşük limitli e2e (auth limiti → 429, 401'den önce 429, `/health` muaf, `TRUST_PROXY` açık/kapalı)
+  - Dosyalar: `src/app.module.ts`, `src/app.setup.ts`, `src/common/throttle/*`, `src/common/decorators/auth-throttle.decorator.ts`, `src/auth/auth.controller.ts`, `src/health/health.controller.ts`, `test/throttle.e2e-spec.ts`, `test/utils/test-app.ts`
 
 - [ ] **T9: Swagger denetimi**
   - Kabul: Bütün korumalı endpoint'lerde `@ApiBearerAuth()` var. 400/401/403/404/413/429 yanıtları belgelenmiş. Upload için `@ApiConsumes('multipart/form-data')` + dosya şeması tanımlı, download için binary yanıt belgelenmiş. DTO'larda örnek değerler var.
@@ -73,7 +73,7 @@ Plan: [`plan.md`](plan.md) · Spec: [`SPEC.md`](../SPEC.md)
 
 - [ ] **T11: README + son doğrulama**
   - Kabul: README'de kurulum (yerel / Docker / Atlas), env tablosu, endpoint tablosu, cURL örnekleri (PNG notu dahil) ve tasarım kararları (A1–A18) var. `build`, `lint`, `test`, `test:e2e`, `test:cov` hepsi geçiyor.
-  - README'de **"Güvenlik / bilinen sınırlamalar"** bölümü: yükleme kontrolünün kapsamı (mimetype + ilk 3 byte) ve kapsamadıkları (polyglot, sona eklenmiş içerik, görüntüleyici açıkları, EXIF/GPS); alınmış önlemler (statik servis yok, UUID adlar, sunucu görüntüyü işlemiyor, 5MB, erişim kontrolü, indirme başlıkları); production önerileri (`sharp` ile yeniden kodlama, ClamAV); 403/404 ayrımının id varlığını açığa çıkarması (A6).
+  - README'de **"Güvenlik / bilinen sınırlamalar"** bölümü: yükleme kontrolünün kapsamı (mimetype + ilk 3 byte) ve kapsamadıkları (polyglot, sona eklenmiş içerik, görüntüleyici açıkları, EXIF/GPS); alınmış önlemler (statik servis yok, UUID adlar, sunucu görüntüyü işlemiyor, 5MB, erişim kontrolü, indirme başlıkları); production önerileri (`sharp` ile yeniden kodlama, ClamAV); 403/404 ayrımının id varlığını açığa çıkarması (A6). Rate limit notları: sayaç IP + endpoint başına ve bellekte (çok kopyada Redis gerekir); aynı IP'yi paylaşan kullanıcılar sayacı paylaşır; hesap bazlı kilitleme yok; `TRUST_PROXY` yalnızca proxy arkasında açılmalı.
   - Doğrula: temiz bir klonla sıfırdan kurulum
   - Dosyalar: `README.md`, `.env.example`
 

@@ -6,10 +6,13 @@ import {
 } from '@nestjs/swagger';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection, ConnectionStates } from 'mongoose';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Public } from '../common/decorators/public.decorator';
 
 @ApiTags('health')
 @Public()
+// Probed by Docker/orchestrators; must never be rate limited (SPEC A16).
+@SkipThrottle({ default: true, auth: true })
 @Controller('health')
 export class HealthController {
   constructor(@InjectConnection() private readonly connection: Connection) {}

@@ -9,6 +9,7 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { AuthThrottle } from '../common/decorators/auth-throttle.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { UserResponseDto } from '../users/dto/user-response.dto';
@@ -26,6 +27,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
+  @AuthThrottle()
   @Post('register')
   @ApiCreatedResponse({ type: RegisterResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid email or weak password' })
@@ -39,6 +41,7 @@ export class AuthController {
   }
 
   @Public()
+  @AuthThrottle()
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ type: TokenPairDto })
@@ -49,6 +52,7 @@ export class AuthController {
   }
 
   @Public()
+  @AuthThrottle()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({
