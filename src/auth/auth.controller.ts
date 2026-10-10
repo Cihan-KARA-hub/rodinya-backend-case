@@ -1,25 +1,31 @@
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
+  ApiBearerAuth,
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiNoContentResponse,
   ApiOkResponse,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import { AuthService } from './auth.service';
+import type { AuthUser } from './auth.types';
 import { RegisterResponseDto, TokenPairDto } from './dto/auth-response.dto';
 import { LoginDto } from './dto/login.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
 
+// @Public() is per route, not on the class: logout needs the access token.
 @ApiTags('auth')
-@Public()
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  @Public()
   @Post('register')
   @ApiCreatedResponse({ type: RegisterResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid email or weak password' })
@@ -32,6 +38,7 @@ export class AuthController {
     return { user: UserResponseDto.from(user), ...tokens };
   }
 
+  @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ type: TokenPairDto })
@@ -39,5 +46,32 @@ export class AuthController {
   @ApiUnauthorizedResponse({ description: 'Invalid email or password' })
   login(@Body() dto: LoginDto): Promise<TokenPairDto> {
     return this.authService.login(dto.email, dto.password);
+  }
+
+  @Public()
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({
+    type: TokenPairDto,
+    description: 'New pair; the refresh token sent is no longer valid',
+  })
+  @ApiBadRequestResponse({ description: 'refreshToken missing or empty' })
+  @ApiUnauthorizedResponse({
+    description:
+      'Invalid, expired or already-used refresh token (reuse also closes the session)',
+  })
+  refresh(@Body() dto: RefreshTokenDto): Promise<TokenPairDto> {
+    return this.authService.refresh(dto.refreshToken);
+  }
+
+  @Post('logout')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiBearerAuth()
+  @ApiNoContentResponse({
+    description: "This device's session is closed; its tokens stop working",
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
+  logout(@CurrentUser() user: AuthUser): Promise<void> {
+    return this.authService.logout(user.sessionId);
   }
 }

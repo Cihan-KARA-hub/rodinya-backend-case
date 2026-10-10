@@ -19,16 +19,24 @@ describe('Auth & users (e2e)', () => {
     const req = http().get('/users/me');
     return token ? req.set('Authorization', `Bearer ${token}`) : req;
   };
+  const refresh = (refreshToken: unknown) =>
+    http().post('/auth/refresh').send({ refreshToken });
+  const logout = (token?: string) => {
+    const req = http().post('/auth/logout');
+    return token ? req.set('Authorization', `Bearer ${token}`) : req;
+  };
+  const db = () => testApp.app.get<Connection>(getConnectionToken());
+  /** Registers once, then logs in once per device; each gets its own session. */
+  const signIn = async (): Promise<TokenPair> =>
+    (await login(credentials).expect(200)).body as TokenPair;
 
   beforeAll(async () => {
     testApp = await createTestApp();
   });
 
   afterEach(async () => {
-    await testApp.app
-      .get<Connection>(getConnectionToken())
-      .collection('users')
-      .deleteMany({});
+    await db().collection('users').deleteMany({});
+    await db().collection('sessions').deleteMany({});
   });
 
   afterAll(async () => {
@@ -159,6 +167,119 @@ describe('Auth & users (e2e)', () => {
         .deleteMany({});
 
       await me(accessToken).expect(401);
+    });
+  });
+
+  describe('POST /auth/refresh', () => {
+    beforeEach(async () => {
+      await register(credentials).expect(201);
+    });
+
+    it('register → login → refresh → /users/me', async () => {
+      const { refreshToken } = await signIn();
+
+      const next = (await refresh(refreshToken).expect(200)).body as TokenPair;
+
+      await me(next.accessToken).expect(200);
+    });
+
+    it('rotates: the new refresh token works, the old one is spent', async () => {
+      const first = await signIn();
+      const second = (await refresh(first.refreshToken).expect(200))
+        .body as TokenPair;
+
+      // The current token keeps working; refresh can be chained.
+      const third = (await refresh(second.refreshToken).expect(200))
+        .body as TokenPair;
+      await me(third.accessToken).expect(200);
+    });
+
+    it('treats a reused refresh token as theft and closes the whole session', async () => {
+      const stolen = await signIn();
+      const legit = (await refresh(stolen.refreshToken).expect(200))
+        .body as TokenPair;
+
+      // The already-used token comes back (e.g. replayed by an attacker).
+      await refresh(stolen.refreshToken).expect(401);
+
+      // The legitimate holder is logged out of that session as well.
+      await refresh(legit.refreshToken).expect(401);
+      await me(legit.accessToken).expect(401);
+    });
+
+    it("leaves the user's other sessions alone after a theft", async () => {
+      const phone = await signIn();
+      const laptop = await signIn();
+      await refresh(phone.refreshToken).expect(200);
+
+      await refresh(phone.refreshToken).expect(401);
+
+      await me(laptop.accessToken).expect(200);
+      await refresh(laptop.refreshToken).expect(200);
+    });
+
+    it('rejects an access token (401)', async () => {
+      const { accessToken } = await signIn();
+
+      await refresh(accessToken).expect(401);
+    });
+
+    it('rejects a malformed token with the same 401 message', async () => {
+      const res = await refresh('not-a-jwt').expect(401);
+
+      expect(res.body).toMatchObject({
+        message: 'Invalid or expired refresh token',
+      });
+    });
+
+    it('rejects an expired session (401)', async () => {
+      const { refreshToken } = await signIn();
+      await db()
+        .collection('sessions')
+        .updateMany({}, { $set: { expiresAt: new Date(Date.now() - 1000) } });
+
+      await refresh(refreshToken).expect(401);
+    });
+
+    it.each([
+      ['missing', undefined],
+      ['empty', ''],
+      ['not a string', 123],
+    ])('rejects a refreshToken that is %s (400)', async (_case, value) => {
+      await refresh(value).expect(400);
+    });
+  });
+
+  describe('POST /auth/logout', () => {
+    beforeEach(async () => {
+      await register(credentials).expect(201);
+    });
+
+    it('closes this session: its access and refresh tokens stop working', async () => {
+      const { accessToken, refreshToken } = await signIn();
+
+      await logout(accessToken).expect(204);
+
+      await me(accessToken).expect(401);
+      await refresh(refreshToken).expect(401);
+      await logout(accessToken).expect(401);
+    });
+
+    it('does not log out the other devices', async () => {
+      const phone = await signIn();
+      const laptop = await signIn();
+
+      await logout(phone.accessToken).expect(204);
+
+      await me(laptop.accessToken).expect(200);
+      await refresh(laptop.refreshToken).expect(200);
+    });
+
+    it('requires an access token (401)', async () => {
+      const { refreshToken } = await signIn();
+
+      await logout().expect(401);
+      await logout(refreshToken).expect(401);
     });
   });
 

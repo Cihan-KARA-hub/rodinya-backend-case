@@ -12,6 +12,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { Role } from '../../users/schemas/user.schema';
 import { UsersService } from '../../users/users.service';
 import type { AuthUser, JwtPayload } from '../auth.types';
+import { SessionsService } from '../sessions/sessions.service';
 import { JwtStrategy } from '../strategies/jwt.strategy';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
@@ -32,17 +33,20 @@ class TestController {
 const ACCESS_SECRET = 'access-secret';
 
 // Guard, strategy and @CurrentUser() wired together as in the app, with only
-// UsersService faked.
+// UsersService and SessionsService faked.
 describe('JwtAuthGuard + JwtStrategy', () => {
   let app: INestApplication<App>;
   const jwt = new JwtService();
   const userId = new Types.ObjectId().toString();
+  const sessionId = new Types.ObjectId().toString();
   const findById = jest.fn();
+  const isActive = jest.fn();
 
   const token = (overrides: Partial<JwtPayload> = {}, secret = ACCESS_SECRET) =>
     jwt.sign(
       {
         sub: userId,
+        sid: sessionId,
         email: 'ali@test.com',
         role: Role.User,
         type: 'access',
@@ -64,6 +68,7 @@ describe('JwtAuthGuard + JwtStrategy', () => {
         JwtStrategy,
         { provide: APP_GUARD, useClass: JwtAuthGuard },
         { provide: UsersService, useValue: { findById } },
+        { provide: SessionsService, useValue: { isActive } },
         { provide: ConfigService, useValue: { get: () => ACCESS_SECRET } },
       ],
     }).compile();
@@ -78,6 +83,8 @@ describe('JwtAuthGuard + JwtStrategy', () => {
       email: 'ali@test.com',
       role: Role.Admin, // differs from the token: the DB value must win
     });
+    isActive.mockReset();
+    isActive.mockResolvedValue(true);
   });
 
   afterAll(async () => {
@@ -97,8 +104,22 @@ describe('JwtAuthGuard + JwtStrategy', () => {
       id: userId,
       email: 'ali@test.com',
       role: Role.Admin,
+      sessionId,
     });
     expect(findById).toHaveBeenCalledWith(userId);
+    expect(isActive).toHaveBeenCalledWith(sessionId, userId);
+  });
+
+  it('rejects a token whose session was closed (logout or theft)', async () => {
+    isActive.mockResolvedValue(false);
+
+    await get('/private', token()).expect(401);
+  });
+
+  it('rejects a token without a valid session id', async () => {
+    await get('/private', token({ sid: undefined })).expect(401);
+    await get('/private', token({ sid: 'not-an-id' })).expect(401);
+    expect(isActive).not.toHaveBeenCalled();
   });
 
   it('rejects a token whose user no longer exists', async () => {

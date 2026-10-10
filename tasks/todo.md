@@ -19,10 +19,10 @@ Plan: [`plan.md`](plan.md) · Spec: [`SPEC.md`](../SPEC.md)
   - Doğrula: `AuthService` unit testleri + `auth.e2e-spec.ts`
   - Dosyalar: `src/users/*`, `src/auth/*`, `src/common/decorators/current-user.decorator.ts`, `test/auth.e2e-spec.ts`
 
-- [ ] **T3: Refresh token**
-  - Kabul: `POST /auth/refresh {refreshToken}` → yeni çift döner. Payload'daki `type: 'access' | 'refresh'` kontrol ediliyor: refresh token Bearer olarak → 401, access token refresh'e → 401. Süresi dolmuş → 401.
-  - Doğrula: unit + e2e
-  - Dosyalar: `src/auth/*`, `test/auth.e2e-spec.ts`
+- [x] **T3: Refresh token + oturumlar**
+  - Kabul: `sessions` koleksiyonu (`userId`, `currentJti`, `expiresAt` TTL). Login/register oturum açar; access token `sid`, refresh token `sid` + `jti` taşır. `POST /auth/refresh {refreshToken}` → yeni çift, `currentJti` döner (rotation), oturum 7 gün uzar. Eski refresh token tekrar gelirse → 401 ve oturum silinir (çalınma tespiti). `POST /auth/logout` (Bearer) → 204, oturum silinir. `JwtStrategy` oturumun varlığını kontrol eder: logout sonrası access token → 401. `type` kontrolü: refresh token Bearer olarak → 401, access token refresh'e → 401. Süresi dolmuş → 401. Body'de `refreshToken` yok/boş → 400.
+  - Doğrula: unit (`SessionsService`, `AuthService.refresh`/`logout`, strategy) + e2e
+  - Dosyalar: `src/auth/*`, `src/auth/sessions/*`, `test/auth.e2e-spec.ts`, `SPEC.md`
 
 ### ✅ KN-1: Auth akışı uçtan uca geçiyor, Swagger "Authorize" çalışıyor
 
