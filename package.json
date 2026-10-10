@@ -13,6 +13,7 @@
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
+    "lint:check": "eslint \"{src,apps,libs,test}/**/*.ts\"",
     "seed:admin": "node dist/database/seeds/seed-admin.js",
     "seed:admin:dev": "ts-node -r tsconfig-paths/register src/database/seeds/seed-admin.ts",
     "test": "jest",

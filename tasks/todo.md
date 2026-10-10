@@ -9,7 +9,7 @@ Plan: [`plan.md`](plan.md) · Spec: [`SPEC.md`](../SPEC.md)
   - Doğrula: `npm run build`, `npm run lint`, health e2e testi (mongodb-memory-server)
   - Dosyalar: `package.json`, `src/main.ts`, `src/app.module.ts`, `src/config/*`, `src/database/database.module.ts`, `src/database/base-schema.options.ts`, `src/health/*`, `test/health.e2e-spec.ts`
 
-- [ ] **T1.5: CI (GitHub Actions)**
+- [x] **T1.5: CI (GitHub Actions)**
   - Kabul: `.github/workflows/ci.yml`; `development` ve `main`'e açılan PR'larda ve bu branch'lere push'ta çalışır. Node 22, `npm ci`, `npm run lint:check`, `npm run build`, `npm test`, `npm run test:e2e`. npm ve mongodb-memory-server binary cache'i var. `package.json`'a düzeltme yapmayan `lint:check` script'i eklenir.
   - Doğrula: Bu görevin PR'ında workflow yeşil. Kasıtlı bir lint hatasıyla kırmızıya döndüğü bir kez görülür.
   - Dosyalar: `.github/workflows/ci.yml`, `package.json`
