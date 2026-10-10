@@ -32,6 +32,10 @@ jobs:
           node-version: 22
           cache: npm
 
+      # Node 22 ships npm 10, which rejects lockfiles written by npm 11
+      # (used locally). Match the lockfile's npm so `npm ci` accepts it.
+      - run: npm install -g npm@11
+
       - name: Cache MongoDB binary
         uses: actions/cache@v4
         with:
