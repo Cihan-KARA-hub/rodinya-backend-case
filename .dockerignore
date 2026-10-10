@@ -1,0 +1,23 @@
+# Built inside the image
+node_modules
+dist
+coverage
+
+# Secrets and local data: never in the image
+.env
+.env.*
+!.env.example
+uploads
+
+# Not needed to build or run
+.git
+.github
+.idea
+.vscode
+*.iml
+test
+tasks
+*.md
+Dockerfile
+docker-compose*.yml
+.dockerignore

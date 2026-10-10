@@ -14,7 +14,7 @@ users schema ──► auth (register/login/JWT/me) ──► refresh
               media upload + /my
                         │
                         ▼
-     MediaAccessGuard ──► GET :id, download ──► DELETE, permissions
+     erişim (pipe + service) ──► GET :id, download ──► DELETE, permissions
                         │
                         ▼
             admin seed ── throttler ── swagger denetimi
@@ -31,9 +31,9 @@ Her dilim kendi testiyle uçtan uca çalışır halde biter. Bir dilim yarım ka
 2. **Kimlik:** User şeması, register/login, JWT strategy + guard, `/users/me`.
 3. **Refresh:** `/auth/refresh`, token `type` ayrımı.
 4. **Yükleme:** Media şeması, storage servisi, JPEG + boyut doğrulama, `/media/upload`, `/media/my`.
-5. **Erişim:** `ParseObjectIdPipe`, `MediaAccessGuard`, `GET /media/:id`, `/download` (stream).
+5. **Erişim:** `ParseObjectIdPipe`, `MediaService` erişim kuralı (sahip / izinli), `GET /media/:id`, `/download` (stream).
 6. **Yönetim:** `DELETE /media/:id`, `GET`/`POST /media/:id/permissions`.
-7. **Admin:** Guard'daki admin dalının testleri + `seed:admin` script'i.
+7. **Admin:** `seed:admin` script'i + admin'in medyaya global yetkisi olmadığını gösteren testler (A3).
 8. **Rate limiting:** Throttler (global ve auth için ayrı limit), `/health` muaf.
 9. **Swagger denetimi:** Bütün endpoint'lerde `@ApiBearerAuth`, 401/403/404/413/429 yanıtları, örnek değerler.
 10. **Docker:** Dockerfile, `.dockerignore`, `docker-compose.yml`, smoke test.
