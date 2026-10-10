@@ -1,6 +1,10 @@
 import {
+  Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseFilePipe,
   Post,
@@ -18,6 +22,7 @@ import {
   ApiConsumes,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiParam,
@@ -33,6 +38,8 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { MediaPageDto, MediaResponseDto } from './dto/media-response.dto';
 import { PaginationQueryDto } from './dto/pagination-query.dto';
+import { PermissionsResponseDto } from './dto/permissions-response.dto';
+import { UpdatePermissionDto } from './dto/update-permission.dto';
 import { MediaService } from './media.service';
 import { JpegFileValidator } from './validators/jpeg-file.validator';
 
@@ -181,5 +188,64 @@ export class MediaController {
     res.attachment(media.fileName);
     res.set(DOWNLOAD_HEADERS);
     return new StreamableFile(stream, { length: size });
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiMediaId()
+  @ApiNoContentResponse({ description: 'Record and file deleted' })
+  @ApiBadRequestResponse({ description: 'Invalid id' })
+  @ApiForbiddenResponse({
+    description: 'Not the owner (allowed users may only view)',
+  })
+  @ApiNotFoundResponse({ description: 'Media not found' })
+  remove(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @CurrentUser() user: AuthUser,
+  ): Promise<void> {
+    return this.mediaService.delete(id, user.id);
+  }
+
+  @Get(':id/permissions')
+  @ApiMediaId()
+  @ApiOkResponse({ type: PermissionsResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid id' })
+  @ApiForbiddenResponse({ description: 'Not the owner' })
+  @ApiNotFoundResponse({ description: 'Media not found' })
+  async permissions(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @CurrentUser() user: AuthUser,
+  ): Promise<PermissionsResponseDto> {
+    const media = await this.mediaService.findForOwner(id, user.id);
+    return PermissionsResponseDto.from(media);
+  }
+
+  @Post(':id/permissions')
+  @HttpCode(HttpStatus.OK)
+  @ApiMediaId()
+  @ApiOkResponse({
+    type: PermissionsResponseDto,
+    description: 'The updated list; add and remove are idempotent',
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Invalid id, userId or action, or the owner targeting themselves',
+  })
+  @ApiForbiddenResponse({ description: 'Not the owner' })
+  @ApiNotFoundResponse({
+    description: 'Media not found, or (on add) user not found',
+  })
+  async updatePermissions(
+    @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
+    @Body() dto: UpdatePermissionDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<PermissionsResponseDto> {
+    const media = await this.mediaService.updatePermissions(
+      id,
+      user.id,
+      dto.userId,
+      dto.action,
+    );
+    return PermissionsResponseDto.from(media);
   }
 }

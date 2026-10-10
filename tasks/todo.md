@@ -38,10 +38,10 @@ Plan: [`plan.md`](plan.md) · Spec: [`SPEC.md`](../SPEC.md)
   - Doğrula: unit (`ParseObjectIdPipe`, `MediaService.findForViewer`) + e2e (A yükler, B → 403, admin → 403, indirme byte'ları ve başlıkları)
   - Dosyalar: `src/common/pipes/parse-object-id.pipe.ts`, `src/common/utils/object-id.ts`, `src/media/media.service.ts`, `src/media/media.controller.ts`, `src/media/dto/media-response.dto.ts`, `test/media.e2e-spec.ts`, `SPEC.md`
 
-- [ ] **T6: Silme + izin yönetimi**
-  - Kabul: `DELETE` → 204; kayıt ve dosya siliniyor, izinli kullanıcı silmeye çalışırsa → 403. `GET /permissions` sadece sahip. `POST /permissions {userId, action}`: `add` idempotent, `remove` çalışıyor. Hedef kullanıcı yok → 404, kendine izin → 400, geçersiz action → 400. İzin eklenince B indirebiliyor, kaldırılınca → 403.
-  - Doğrula: `MediaService` unit + e2e (tam izin senaryosu)
-  - Dosyalar: `src/media/dto/update-permission.dto.ts`, `src/media/media.service.ts`, `src/media/media.controller.ts`, `test/media.e2e-spec.ts`
+- [x] **T6: Silme + izin yönetimi**
+  - Kabul: Üç endpoint de yalnızca sahibe açık (A3, A4): izinli kullanıcı, yabancı ve admin → 403, kayıt yok → 404, bozuk id → 400. `DELETE` → 204; önce kayıt, sonra dosya silinir (dosya silinemezse log + 204, A12). `GET /permissions` → `{ mediaId, allowedUserIds }`. `POST /permissions {userId, action}` → `{ mediaId, allowedUserIds }`: `add` idempotent ve hedef kullanıcı yoksa → 404; `remove` idempotent ve kullanıcının var olmasını istemez; kendine izin → 400; geçersiz `action` / `userId` → 400. Güncellemeler sahip kontrolüyle tek atomik işlem. İzin eklenince B indirebiliyor, kaldırılınca → 403.
+  - Doğrula: `MediaService` unit + e2e (tam izin senaryosu: A yükler → B 403 → A izin verir → B indirir, byte'lar aynı → A kaldırır → B 403)
+  - Dosyalar: `src/media/dto/update-permission.dto.ts`, `src/media/dto/permissions-response.dto.ts`, `src/media/media.service.ts`, `src/media/media.controller.ts`, `test/media.e2e-spec.ts`, `SPEC.md`
 
 ### ✅ KN-2: Case'teki bütün medya senaryoları e2e testlerde geçiyor
 

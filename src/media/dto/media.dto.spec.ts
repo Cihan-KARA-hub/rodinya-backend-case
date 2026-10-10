@@ -6,6 +6,8 @@ import { Role } from '../../users/schemas/user.schema';
 import { MediaDocument } from '../schemas/media.schema';
 import { MediaResponseDto } from './media-response.dto';
 import { PaginationQueryDto } from './pagination-query.dto';
+import { PermissionsResponseDto } from './permissions-response.dto';
+import { UpdatePermissionDto } from './update-permission.dto';
 
 describe('PaginationQueryDto', () => {
   const parse = async (query: Record<string, string>) => {
@@ -95,5 +97,47 @@ describe('MediaResponseDto.from', () => {
     const dto = MediaResponseDto.from(media, viewer(allowed.toString()));
 
     expect(dto).not.toHaveProperty('allowedUserIds');
+  });
+});
+
+describe('UpdatePermissionDto', () => {
+  const failed = async (body: Record<string, unknown>) =>
+    (await validate(plainToInstance(UpdatePermissionDto, body))).map(
+      (e) => e.property,
+    );
+  const userId = new Types.ObjectId().toString();
+
+  it.each(['add', 'remove'])('accepts action "%s"', async (action) => {
+    await expect(failed({ userId, action })).resolves.toEqual([]);
+  });
+
+  it.each([
+    ['an unknown action', { userId, action: 'grant' }, ['action']],
+    ['a missing action', { userId }, ['action']],
+    ['an uppercase action', { userId, action: 'ADD' }, ['action']],
+    ['a malformed userId', { userId: 'abc', action: 'add' }, ['userId']],
+    ['a 12-char userId', { userId: 'aaaaaaaaaaaa', action: 'add' }, ['userId']],
+    ['a missing userId', { action: 'add' }, ['userId']],
+    ['a numeric userId', { userId: 123, action: 'add' }, ['userId']],
+  ])('rejects %s', async (_case, body, fields) => {
+    await expect(failed(body)).resolves.toEqual(fields);
+  });
+});
+
+describe('PermissionsResponseDto.from', () => {
+  it('returns only the media id and the allowed user ids', () => {
+    const mediaId = new Types.ObjectId();
+    const allowed = new Types.ObjectId();
+    const media = {
+      _id: mediaId,
+      ownerId: new Types.ObjectId(),
+      filePath: 'x/y.jpg',
+      allowedUserIds: [allowed],
+    } as unknown as MediaDocument;
+
+    expect(PermissionsResponseDto.from(media)).toEqual({
+      mediaId: mediaId.toString(),
+      allowedUserIds: [allowed.toString()],
+    });
   });
 });

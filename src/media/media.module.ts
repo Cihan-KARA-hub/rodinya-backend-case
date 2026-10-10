@@ -4,6 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { MulterModule } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { EnvVars } from '../config/env.validation';
+import { UsersModule } from '../users/users.module';
 import { MediaStorageService } from './media-storage.service';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
@@ -12,6 +13,7 @@ import { Media, MediaSchema } from './schemas/media.schema';
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: Media.name, schema: MediaSchema }]),
+    UsersModule,
     MulterModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService<EnvVars, true>) => ({

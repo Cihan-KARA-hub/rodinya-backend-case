@@ -315,13 +315,12 @@ describe('Media upload & /media/my (e2e)', () => {
     /** Error bodies of download() arrive as raw bytes, like the file would. */
     const errorBody = (res: Response): unknown =>
       Buffer.isBuffer(res.body) ? JSON.parse(res.body.toString()) : res.body;
-    const setAllowed = (ids: string[]) =>
-      db()
-        .collection('media')
-        .updateOne(
-          { _id: new Types.ObjectId(mediaId) },
-          { $set: { allowedUserIds: ids.map((id) => new Types.ObjectId(id)) } },
-        );
+    const permit = (userId: string, action: 'add' | 'remove') =>
+      http()
+        .post(`/media/${mediaId}/permissions`)
+        .set('Authorization', `Bearer ${alice.token}`)
+        .send({ userId, action })
+        .expect(200);
 
     beforeEach(async () => {
       carol = await signUp('carol@test.com');
@@ -333,8 +332,7 @@ describe('Media upload & /media/my (e2e)', () => {
 
       const res = await upload(alice.token, JPEG, 'fotoğraf "tatil".jpg');
       mediaId = (res.body as MediaBody).id;
-      // T6 adds the permissions endpoint; grant bob directly for now.
-      await setAllowed([bob.id]);
+      await permit(bob.id, 'add');
     });
 
     describe('who gets in', () => {
@@ -377,7 +375,7 @@ describe('Media upload & /media/my (e2e)', () => {
       });
 
       it('refuses a user again once removed from the allowed list', async () => {
-        await setAllowed([]);
+        await permit(bob.id, 'remove');
 
         await detail(bob.token).expect(403);
         await download(bob.token).expect(403);
@@ -471,6 +469,254 @@ describe('Media upload & /media/my (e2e)', () => {
         });
         // The record itself is still there.
         await detail(alice.token).expect(200);
+      });
+    });
+  });
+
+  describe('permissions and delete (owner only)', () => {
+    let carol: { token: string; id: string };
+    let admin: { token: string; id: string };
+    let mediaId: string;
+
+    const as = (token: string) => ({
+      getPermissions: () =>
+        http()
+          .get(`/media/${mediaId}/permissions`)
+          .set('Authorization', `Bearer ${token}`),
+      setPermission: (body: object) =>
+        http()
+          .post(`/media/${mediaId}/permissions`)
+          .set('Authorization', `Bearer ${token}`)
+          .send(body),
+      remove: (id = mediaId) =>
+        http().delete(`/media/${id}`).set('Authorization', `Bearer ${token}`),
+      download: () =>
+        http()
+          .get(`/media/${mediaId}/download`)
+          .set('Authorization', `Bearer ${token}`)
+          .buffer(true)
+          .parse((res, cb) => {
+            const chunks: Buffer[] = [];
+            res.on('data', (c: Buffer) => chunks.push(c));
+            res.on('end', () => cb(null, Buffer.concat(chunks)));
+          }),
+    });
+    const allowedIds = async () =>
+      (
+        (await as(alice.token).getPermissions().expect(200)).body as {
+          allowedUserIds: string[];
+        }
+      ).allowedUserIds;
+
+    beforeEach(async () => {
+      carol = await signUp('carol@test.com');
+      admin = await signUp('admin@test.com');
+      // T7 adds seed:admin; promote directly for now.
+      await db()
+        .collection('users')
+        .updateOne({ email: 'admin@test.com' }, { $set: { role: 'admin' } });
+      mediaId = ((await upload(alice.token, JPEG)).body as MediaBody).id;
+    });
+
+    it('full sharing flow: B is refused, granted, downloads, revoked, refused', async () => {
+      await as(bob.token).download().expect(403);
+
+      const granted = await as(alice.token)
+        .setPermission({ userId: bob.id, action: 'add' })
+        .expect(200);
+      expect(granted.body).toEqual({ mediaId, allowedUserIds: [bob.id] });
+
+      const file = await as(bob.token).download().expect(200);
+      expect(Buffer.compare(file.body as Buffer, JPEG)).toBe(0);
+
+      const revoked = await as(alice.token)
+        .setPermission({ userId: bob.id, action: 'remove' })
+        .expect(200);
+      expect(revoked.body).toEqual({ mediaId, allowedUserIds: [] });
+
+      await as(bob.token).download().expect(403);
+    });
+
+    describe('POST /media/:id/permissions', () => {
+      it('adds idempotently', async () => {
+        for (let i = 0; i < 2; i++) {
+          await as(alice.token)
+            .setPermission({ userId: bob.id, action: 'add' })
+            .expect(200);
+        }
+
+        await expect(allowedIds()).resolves.toEqual([bob.id]);
+      });
+
+      it('keeps several users', async () => {
+        await as(alice.token)
+          .setPermission({ userId: bob.id, action: 'add' })
+          .expect(200);
+        await as(alice.token)
+          .setPermission({ userId: carol.id, action: 'add' })
+          .expect(200);
+
+        await expect(allowedIds()).resolves.toEqual([bob.id, carol.id]);
+      });
+
+      it('removes idempotently, also for a user not in the list', async () => {
+        await as(alice.token)
+          .setPermission({ userId: carol.id, action: 'remove' })
+          .expect(200, { mediaId, allowedUserIds: [] });
+      });
+
+      it('answers 404 when adding a user who does not exist', async () => {
+        const res = await as(alice.token)
+          .setPermission({
+            userId: new Types.ObjectId().toString(),
+            action: 'add',
+          })
+          .expect(404);
+
+        expect(res.body).toMatchObject({ message: 'User not found' });
+      });
+
+      it('removes the id of a user who does not exist (cleanup)', async () => {
+        await as(alice.token)
+          .setPermission({
+            userId: new Types.ObjectId().toString(),
+            action: 'remove',
+          })
+          .expect(200);
+      });
+
+      it.each(['add', 'remove'])(
+        'refuses the owner targeting themselves (%s, 400)',
+        async (action) => {
+          await as(alice.token)
+            .setPermission({ userId: alice.id, action })
+            .expect(400);
+        },
+      );
+
+      it.each([
+        ['an unknown action', () => ({ userId: bob.id, action: 'grant' })],
+        ['a missing action', () => ({ userId: bob.id })],
+        ['a malformed userId', () => ({ userId: 'abc', action: 'add' })],
+        ['a missing userId', () => ({ action: 'add' })],
+        [
+          'an extra field',
+          () => ({ userId: bob.id, action: 'add', role: 'admin' }),
+        ],
+      ])('rejects %s (400)', async (_case, body) => {
+        await as(alice.token).setPermission(body()).expect(400);
+      });
+
+      it.each([
+        ['an allowed user (view only)', () => bob],
+        ['a stranger', () => carol],
+        ['an admin (no global rights)', () => admin],
+      ])('refuses %s with 403 and changes nothing', async (_case, who) => {
+        await as(alice.token)
+          .setPermission({ userId: bob.id, action: 'add' })
+          .expect(200);
+
+        await as(who().token)
+          .setPermission({ userId: carol.id, action: 'add' })
+          .expect(403);
+        await as(who().token)
+          .setPermission({ userId: bob.id, action: 'remove' })
+          .expect(403);
+
+        await expect(allowedIds()).resolves.toEqual([bob.id]);
+      });
+    });
+
+    describe('GET /media/:id/permissions', () => {
+      it('shows the owner the list', async () => {
+        await as(alice.token)
+          .setPermission({ userId: bob.id, action: 'add' })
+          .expect(200);
+
+        await as(alice.token)
+          .getPermissions()
+          .expect(200, { mediaId, allowedUserIds: [bob.id] });
+      });
+
+      it.each([
+        ['an allowed user', () => bob],
+        ['a stranger', () => carol],
+        ['an admin', () => admin],
+      ])('refuses %s with 403', async (_case, who) => {
+        await as(alice.token)
+          .setPermission({ userId: bob.id, action: 'add' })
+          .expect(200);
+
+        await as(who().token).getPermissions().expect(403);
+      });
+
+      it('answers 400 for a malformed id and 404 for a missing one', async () => {
+        await http()
+          .get('/media/abc/permissions')
+          .set('Authorization', `Bearer ${alice.token}`)
+          .expect(400);
+        await http()
+          .get(`/media/${new Types.ObjectId().toString()}/permissions`)
+          .set('Authorization', `Bearer ${alice.token}`)
+          .expect(404);
+      });
+    });
+
+    describe('DELETE /media/:id', () => {
+      it('deletes the record and the file (204), then answers 404', async () => {
+        const [stored] = await filesOnDisk();
+
+        await as(alice.token).remove().expect(204);
+
+        await expect(filesOnDisk()).resolves.toEqual([]);
+        await expect(
+          db()
+            .collection('media')
+            .countDocuments({ _id: new Types.ObjectId(mediaId) }),
+        ).resolves.toBe(0);
+        // The user's folder is kept (SPEC A12).
+        await expect(
+          readdir(join(testApp.uploadDir, stored.split('/')[0])),
+        ).resolves.toEqual([]);
+
+        await as(alice.token).remove().expect(404);
+        await http()
+          .get(`/media/${mediaId}`)
+          .set('Authorization', `Bearer ${alice.token}`)
+          .expect(404);
+      });
+
+      it.each([
+        ['an allowed user (view only)', () => bob],
+        ['a stranger', () => carol],
+        ['an admin (no global rights)', () => admin],
+      ])('refuses %s with 403 and keeps everything', async (_case, who) => {
+        await as(alice.token)
+          .setPermission({ userId: bob.id, action: 'add' })
+          .expect(200);
+
+        await as(who().token).remove().expect(403);
+
+        await expect(filesOnDisk()).resolves.toHaveLength(1);
+        await as(alice.token).download().expect(200);
+      });
+
+      it('answers 400 for a malformed id', async () => {
+        await as(alice.token).remove('abc').expect(400);
+      });
+
+      it('removes only that media from /media/my', async () => {
+        await upload(alice.token, JPEG, 'keep.jpg').expect(201);
+
+        await as(alice.token).remove().expect(204);
+
+        const res = await http()
+          .get('/media/my')
+          .set('Authorization', `Bearer ${alice.token}`)
+          .expect(200);
+        expect((res.body as MediaPage).items.map((m) => m.fileName)).toEqual([
+          'keep.jpg',
+        ]);
       });
     });
   });
