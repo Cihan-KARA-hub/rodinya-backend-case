@@ -1,12 +1,20 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MongooseModule, getModelToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
+import { existsSync } from 'fs';
 import { mkdtemp, readFile, readdir, rm } from 'fs/promises';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { Model, Types } from 'mongoose';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { User } from '../users/schemas/user.schema';
+import { MediaStorageService } from './media-storage.service';
 import { MediaModule } from './media.module';
 import { MediaService } from './media.service';
 import { Media } from './schemas/media.schema';
@@ -18,6 +26,8 @@ describe('MediaService', () => {
   let moduleRef: TestingModule;
   let service: MediaService;
   let mediaModel: Model<Media>;
+  let userModel: Model<User>;
+  let storage: MediaStorageService;
   let uploadDir: string;
 
   const owner = new Types.ObjectId().toString();
@@ -49,6 +59,8 @@ describe('MediaService', () => {
     await moduleRef.init(); // runs onModuleInit (creates UPLOAD_DIR)
     service = moduleRef.get(MediaService);
     mediaModel = moduleRef.get(getModelToken(Media.name));
+    userModel = moduleRef.get(getModelToken(User.name));
+    storage = moduleRef.get(MediaStorageService);
   });
 
   afterEach(async () => {
@@ -211,6 +223,212 @@ describe('MediaService', () => {
       await expect(
         service.findForViewer(new Types.ObjectId(), stranger),
       ).rejects.toThrow(new NotFoundException('Media not found'));
+    });
+  });
+
+  describe('owner-only operations', () => {
+    const stranger = new Types.ObjectId().toString();
+    let allowed: string;
+    let mediaId: Types.ObjectId;
+    let filePath: string;
+
+    /** A real user document, since `add` checks that the target exists. */
+    const newUser = async (email: string) =>
+      (await userModel.create({ email, passwordHash: 'h' }))._id.toString();
+
+    const allowedIds = async () =>
+      ((await mediaModel.findById(mediaId).lean())?.allowedUserIds ?? []).map(
+        (id) => id.toString(),
+      );
+
+    beforeEach(async () => {
+      allowed = await newUser('allowed@test.com');
+      const media = await service.create(owner, upload());
+      mediaId = media._id;
+      filePath = media.filePath;
+      await mediaModel.updateOne(
+        { _id: mediaId },
+        { $set: { allowedUserIds: [new Types.ObjectId(allowed)] } },
+      );
+    });
+
+    afterEach(async () => {
+      await userModel.deleteMany({});
+      jest.restoreAllMocks();
+    });
+
+    describe('findForOwner', () => {
+      it('returns the record to its owner', async () => {
+        await expect(
+          service.findForOwner(mediaId, owner),
+        ).resolves.toBeDefined();
+      });
+
+      it.each([
+        ['an allowed user (view only, SPEC A4)', () => allowed],
+        ['a stranger', () => stranger],
+      ])('refuses %s with 403', async (_case, who) => {
+        await expect(service.findForOwner(mediaId, who())).rejects.toThrow(
+          ForbiddenException,
+        );
+      });
+
+      it('answers 404 for a missing record', async () => {
+        await expect(
+          service.findForOwner(new Types.ObjectId(), owner),
+        ).rejects.toThrow(NotFoundException);
+      });
+    });
+
+    describe('delete', () => {
+      it('removes the record and its file', async () => {
+        await service.delete(mediaId, owner);
+
+        await expect(mediaModel.findById(mediaId)).resolves.toBeNull();
+        expect(existsSync(join(uploadDir, filePath))).toBe(false);
+      });
+
+      it.each([
+        ['an allowed user', () => allowed],
+        ['a stranger', () => stranger],
+      ])('refuses %s with 403 and deletes nothing', async (_case, who) => {
+        await expect(service.delete(mediaId, who())).rejects.toThrow(
+          ForbiddenException,
+        );
+
+        await expect(mediaModel.findById(mediaId)).resolves.not.toBeNull();
+        expect(existsSync(join(uploadDir, filePath))).toBe(true);
+      });
+
+      it('answers 404 for a missing record', async () => {
+        await expect(
+          service.delete(new Types.ObjectId(), owner),
+        ).rejects.toThrow(NotFoundException);
+      });
+
+      it('still succeeds when the file is already gone', async () => {
+        await rm(join(uploadDir, filePath));
+
+        await expect(service.delete(mediaId, owner)).resolves.toBeUndefined();
+        await expect(mediaModel.findById(mediaId)).resolves.toBeNull();
+      });
+
+      it('deletes the record and logs when the file cannot be removed', async () => {
+        jest
+          .spyOn(storage, 'delete')
+          .mockRejectedValue(new Error('EBUSY: resource busy'));
+        const logError = jest
+          .spyOn(Logger.prototype, 'error')
+          .mockImplementation(() => undefined);
+
+        await expect(service.delete(mediaId, owner)).resolves.toBeUndefined();
+
+        await expect(mediaModel.findById(mediaId)).resolves.toBeNull();
+        expect(logError).toHaveBeenCalledWith(
+          expect.stringContaining('could not be removed'),
+          expect.any(String),
+        );
+      });
+    });
+
+    describe('updatePermissions', () => {
+      let bob: string;
+
+      beforeEach(async () => {
+        bob = await newUser('bob@test.com');
+      });
+
+      it('adds a user and returns the updated list', async () => {
+        const media = await service.updatePermissions(
+          mediaId,
+          owner,
+          bob,
+          'add',
+        );
+
+        expect(media.allowedUserIds.map((id) => id.toString())).toEqual([
+          allowed,
+          bob,
+        ]);
+      });
+
+      it('adds idempotently (no duplicates)', async () => {
+        await service.updatePermissions(mediaId, owner, bob, 'add');
+        await service.updatePermissions(mediaId, owner, bob, 'add');
+
+        await expect(allowedIds()).resolves.toEqual([allowed, bob]);
+      });
+
+      it('removes a user, idempotently', async () => {
+        await service.updatePermissions(mediaId, owner, allowed, 'remove');
+        await service.updatePermissions(mediaId, owner, allowed, 'remove');
+
+        await expect(allowedIds()).resolves.toEqual([]);
+      });
+
+      it('removes the id of a user who no longer exists', async () => {
+        await userModel.deleteOne({ _id: allowed });
+
+        await service.updatePermissions(mediaId, owner, allowed, 'remove');
+
+        await expect(allowedIds()).resolves.toEqual([]);
+      });
+
+      it('answers 404 when adding a user who does not exist', async () => {
+        await expect(
+          service.updatePermissions(
+            mediaId,
+            owner,
+            new Types.ObjectId().toString(),
+            'add',
+          ),
+        ).rejects.toThrow(new NotFoundException('User not found'));
+      });
+
+      it.each(['add', 'remove'] as const)(
+        'refuses the owner targeting themselves (%s) with 400',
+        async (action) => {
+          await expect(
+            service.updatePermissions(mediaId, owner, owner, action),
+          ).rejects.toThrow(BadRequestException);
+        },
+      );
+
+      it.each([
+        ['an allowed user', () => allowed],
+        ['a stranger', () => stranger],
+      ])('refuses %s with 403 and changes nothing', async (_case, who) => {
+        await expect(
+          service.updatePermissions(mediaId, who(), bob, 'add'),
+        ).rejects.toThrow(ForbiddenException);
+
+        await expect(allowedIds()).resolves.toEqual([allowed]);
+      });
+
+      it('checks ownership before anything else (403, not 400/404)', async () => {
+        await expect(
+          service.updatePermissions(mediaId, stranger, stranger, 'add'),
+        ).rejects.toThrow(ForbiddenException);
+      });
+
+      it('answers 404 for a missing media', async () => {
+        await expect(
+          service.updatePermissions(new Types.ObjectId(), owner, bob, 'add'),
+        ).rejects.toThrow(new NotFoundException('Media not found'));
+      });
+
+      it('keeps both of two concurrent adds', async () => {
+        const carol = await newUser('carol@test.com');
+
+        await Promise.all([
+          service.updatePermissions(mediaId, owner, bob, 'add'),
+          service.updatePermissions(mediaId, owner, carol, 'add'),
+        ]);
+
+        await expect(allowedIds()).resolves.toEqual(
+          expect.arrayContaining([allowed, bob, carol]),
+        );
+      });
     });
   });
 });
