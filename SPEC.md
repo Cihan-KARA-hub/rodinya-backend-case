@@ -51,6 +51,7 @@ dosya bazında başka kullanıcılarla paylaşabildiği bir REST API.
 - `multer` (Nest'in `FileInterceptor`'ı), `bcrypt`
 - `@nestjs/throttler`
 - Test: Jest, Supertest, `mongodb-memory-server`
+- CI: GitHub Actions (her PR'da lint, build, unit ve e2e testleri)
 
 ## Komutlar
 
@@ -65,6 +66,7 @@ Unit test:  npm test
 E2E test:   npm run test:e2e
 Coverage:   npm run test:cov
 Admin seed: npm run seed:admin
+Lint (CI): npm run lint:check   # düzeltme yapmaz, hata varsa kırılır
 Swagger:    http://localhost:3000/docs
 
 Docker:
@@ -205,7 +207,7 @@ export class MediaAccessGuard implements CanActivate {
 ## Sınırlar
 
 - **Her zaman:** commit öncesi lint + testleri çalıştır, input'ları DTO ile doğrula, `.env`'i repoya koyma, yanıtlarda hassas alanları (passwordHash, filePath) gizle.
-- **Önce sor:** veri modeline alan eklemek (ör. refresh token hash), yukarıdaki listede olmayan bir bağımlılık eklemek, endpoint sözleşmesini değiştirmek, push / force push.
+- **Önce sor:** veri modeline alan eklemek (ör. refresh token hash), yukarıdaki listede olmayan bir bağımlılık eklemek, endpoint sözleşmesini değiştirmek, CI workflow'unu değiştirmek, force push, PR merge etmek.
 - **Asla:** secret'ları commit'lemek, `uploads/` klasörünü statik olarak servis etmek, başarısız testleri silmek veya skip'lemek, `.env` içeriğini loglamak.
 
 ## Başarı Kriterleri
@@ -223,4 +225,4 @@ export class MediaAccessGuard implements CanActivate {
 ## Açık Sorular
 
 Yok. Bütün sorular 2026-10-10'da yanıtlandı (A1, A3, A16, A17, branch: `development`).
-Not: Repoda henüz commit ve remote yok. GitHub remote'u teslim öncesi eklenecek.
+Repo: `git@github.com:Cihan-KARA-hub/rodinya-backend-case.git`. Git/GitHub akışı için bkz. [`tasks/plan.md`](tasks/plan.md#git-ve-github-akışı).
