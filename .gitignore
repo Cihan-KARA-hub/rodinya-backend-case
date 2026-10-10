@@ -1,0 +1,23 @@
+# Dependencies & build
+node_modules/
+dist/
+coverage/
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Uploads (only keep the folder)
+uploads/*
+!uploads/.gitkeep
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS / logs
+.DS_Store
+Thumbs.db
+*.log
