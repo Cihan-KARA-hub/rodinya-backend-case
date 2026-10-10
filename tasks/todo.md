@@ -14,7 +14,7 @@ Plan: [`plan.md`](plan.md) · Spec: [`SPEC.md`](../SPEC.md)
   - Doğrula: Bu görevin PR'ında workflow yeşil. Kasıtlı bir lint hatasıyla kırmızıya döndüğü bir kez görülür.
   - Dosyalar: `.github/workflows/ci.yml`, `package.json`
 
-- [ ] **T2: Users + register/login + /users/me**
+- [x] **T2: Users + register/login + /users/me**
   - Kabul: User şeması (email unique + lowercase). Register → 201 + token'lar, aynı email → 409. Şifre kuralı (A13) → 400. Login → 200, hatalı → 401 (genel mesaj). `JwtStrategy` + `JwtAuthGuard`, `@CurrentUser()`. `/users/me` passwordHash döndürmüyor.
   - Doğrula: `AuthService` unit testleri + `auth.e2e-spec.ts`
   - Dosyalar: `src/users/*`, `src/auth/*`, `src/common/decorators/current-user.decorator.ts`, `test/auth.e2e-spec.ts`
