@@ -28,10 +28,10 @@ Plan: [`plan.md`](plan.md) · Spec: [`SPEC.md`](../SPEC.md)
 
 ## Faz 2: Medya Çekirdeği
 
-- [ ] **T4: Upload + /media/my**
-  - Kabul: Media şeması (`ownerId`, `allowedUserIds` index'li). `MediaStorageService` (`<uuid>.jpg` yazar, stream açar, siler, `UPLOAD_DIR`'i açılışta oluşturur). Upload → 201. PNG / sahte uzantılı dosya (magic byte) → 400, dosya yok → 400, >5MB → 413. `/media/my` sadece sahibin kayıtlarını döndürüyor. Yanıtta `filePath` yok.
-  - Doğrula: e2e (jpeg fixture, png fixture, 5MB+1 buffer)
-  - Dosyalar: `src/media/schemas/*`, `src/media/media-storage.service.ts`, `src/media/media.service.ts`, `src/media/media.controller.ts`, `src/media/validators/jpeg-file.validator.ts`, `test/media.e2e-spec.ts`, `test/fixtures/*`
+- [x] **T4: Upload + /media/my**
+  - Kabul: Media şeması (`ownerId`, `allowedUserIds` index'li). `MediaStorageService` (`<UPLOAD_DIR>/<userId>/<uuid>.jpg` yazar, stream açar, siler, `UPLOAD_DIR`'i açılışta oluşturur). Dosya bellekte doğrulanır, sonra diske yazılır; DB kaydı başarısızsa dosya silinir. Upload → 201. PNG / sahte uzantılı dosya (magic byte) → 400, dosya yok → 400, >5MB → 413. Dosya adı UTF-8 okunur ve temizlenir (A9). `/media/my` sadece sahibin kayıtlarını, en yeni en üstte ve sayfalı döndürür (`{ items, page, limit, total, totalPages }`, geçersiz `page`/`limit` → 400). Yanıtta `filePath` yok; `allowedUserIds` sahip ve admin'e görünür.
+  - Doğrula: unit (JPEG doğrulayıcı, dosya adı temizleyici, storage) + e2e (jpeg fixture, png fixture, 5MB+1 buffer, Türkçe dosya adı, sayfalama)
+  - Dosyalar: `src/media/schemas/*`, `src/media/media-storage.service.ts`, `src/media/media.service.ts`, `src/media/media.controller.ts`, `src/media/validators/jpeg-file.validator.ts`, `src/media/utils/sanitize-file-name.ts`, `src/media/dto/*`, `test/media.e2e-spec.ts`, `test/fixtures/*`, `SPEC.md`
 
 - [ ] **T5: Erişim guard'ı + detay + indirme**
   - Kabul: `ParseObjectIdPipe` (bozuk id → 400). `MediaAccessGuard` + `@OwnerOnly()` metadata: 404 / 403 / geçiş (sahip, izinli, admin). `GET /media/:id` meta döner (`allowedUserIds` yalnızca sahibe). `/download` `StreamableFile` döner; `Content-Type: image/jpeg`, `Content-Disposition: attachment; filename="<orijinal>"`, byte'lar orijinalle aynı. `/uploads/<dosya>` → 404.
