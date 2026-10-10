@@ -1,0 +1,51 @@
+# API + MongoDB in one command (SPEC A17):
+#   cp .env.example .env      # fill in the JWT secrets
+#   docker compose up --build -d
+#   open http://localhost:3000/docs
+#
+# Optional, in .env:
+#   DOCKER_MONGO_URI=mongodb+srv://...   use Atlas instead of the bundled mongo
+#   API_PORT=3001                        if port 3000 is already taken
+# Admin account (reads ADMIN_EMAIL / ADMIN_PASSWORD from .env):
+#   docker compose exec api npm run seed:admin
+name: media-library
+
+services:
+  api:
+    build: .
+    image: media-library-api
+    init: true # a tiny init as PID 1: forwards signals, reaps zombies
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Overrides .env, whose MONGO_URI points at localhost for running
+      # without Docker; inside the container "localhost" is the container.
+      MONGO_URI: ${DOCKER_MONGO_URI:-mongodb://mongo:27017/media-library}
+      UPLOAD_DIR: /app/uploads
+      PORT: '3000'
+      NODE_ENV: production
+    ports:
+      - '${API_PORT:-3000}:3000'
+    volumes:
+      - uploads:/app/uploads # uploaded files survive restarts and rebuilds
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    # No published port: only the api reaches it, over the compose network.
+    # This also avoids clashing with a MongoDB already running on 27017.
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  uploads:
+  mongo-data:

@@ -19,23 +19,23 @@ dosya bazında başka kullanıcılarla paylaşabildiği bir REST API.
 
 | # | Konu | Karar |
 |---|------|----------|
-| A1 | Refresh token | **Stateless** *(onaylandı)*: token ayrı secret ile imzalanır, `POST /auth/refresh` yeni access + refresh çifti döner. Veri modeli değişmez; DB'de token hash tutulmaz, bu yüzden iptal/rotasyon kontrolü yoktur. Access ve refresh token'ları payload'daki `type` alanıyla ayrılır, yani biri diğerinin yerine kullanılamaz. |
+| A1 | Refresh token | **Oturum tabanlı, rotation + çalınma tespiti** *(T3'te onaylandı; önceki stateless kararın yerine geçer)*. Her login/register bir `sessions` kaydı açar (cihaz başına bir oturum). Token'lar ayrı secret'larla imzalanır ve payload'daki `type` alanıyla ayrılır, biri diğerinin yerine kullanılamaz. Access token `sid`, refresh token `sid` + `jti` taşır. **Rotation:** `POST /auth/refresh` yalnızca oturumun güncel `jti`'sine sahip refresh token'ı kabul eder, yeni çift döner ve `currentJti`'yi değiştirir; eski refresh token anında geçersiz olur. **Çalınma tespiti:** eski (`jti`'si güncel olmayan) bir refresh token gelirse oturumun tamamı silinir ve 401 döner. **Logout:** `POST /auth/logout` oturumu siler. **Anında etki:** `JwtStrategy` her istekte oturumun hâlâ var olduğunu kontrol eder; logout veya çalınma tespitinden sonra o oturumun access token'ı da 401 alır. Her refresh oturumun süresini yeniden 7 gün uzatır (kayan oturum). Süresi dolan oturumları MongoDB TTL index'i siler. |
 | A2 | Token süreleri | Access 15 dk, refresh 7 gün. İsteğe bağlı `JWT_ACCESS_EXPIRES_IN` / `JWT_REFRESH_EXPIRES_IN` env değişkenleriyle değiştirilebilir. |
-| A3 | `admin` rolü | *(Onaylandı)* Admin **her medyayı görüntüleyebilir, indirebilir ve silebilir**: `GET /media/:id`, `/download`, `DELETE`. İzin yönetimi (`GET`/`POST /permissions`) sahibe özel kalır. Kayıtla açılan her hesap `user` olur. Admin hesabı `npm run seed:admin` script'iyle oluşturulur; script `ADMIN_EMAIL` / `ADMIN_PASSWORD` env değişkenlerini okur ve idempotenttir. |
-| A4 | İzin kapsamı | İzinli kullanıcı yalnızca **görüntüleyebilir**: `GET /media/:id` ve `/download`. Silme sahip ve admin'e, izin yönetimi (`GET`/`POST /permissions`) yalnızca sahibe açıktır. |
-| A5 | `GET /media/my` | Sadece kullanıcının **sahibi olduğu** medyalar listelenir (paylaşılanlar dahil değildir). |
+| A3 | `admin` rolü | *(T5'te güncellendi)* `role: 'user' \| 'admin'` alanı vardır; admin hesabı `npm run seed:admin` script'iyle oluşturulur (`ADMIN_EMAIL` / `ADMIN_PASSWORD`, idempotent). Kayıtla açılan her hesap `user` olur. **Admin'in medya üzerinde hiçbir global yetkisi yoktur:** bir görsele yalnızca sahibi ve sahibin izin verdiği kullanıcılar erişebilir; admin de sahip ya da izinli değilse 403 alır. Medya erişim kontrolünde rol hiç kullanılmaz. |
+| A4 | İzin kapsamı | İzinli kullanıcı yalnızca **görüntüleyebilir**: `GET /media/:id` ve `/download`. Silme ve izin yönetimi (`GET`/`POST /permissions`) yalnızca sahibe açıktır. |
+| A5 | `GET /media/my` | Sadece kullanıcının **sahibi olduğu** medyalar listelenir (paylaşılanlar dahil değildir). En yeni en üstte. **Sayfalı** *(T4'te eklendi)*: `?page=1&limit=20` (varsayılan 1 / 20, `limit` en fazla 100); geçersiz değer → 400. Yanıt `{ items, page, limit, total, totalPages }`. |
 | A6 | 404 ve 403 ayrımı | Kayıt yoksa 404, kayıt var ama erişim yoksa 403 döner (case 403 istiyor). Geçersiz ObjectId → 400. |
 | A7 | JPEG doğrulama | Hem `mimetype === image/jpeg` hem de dosyanın ilk byte'ları (`FF D8 FF`) kontrol edilir. Örnek cURL'deki `image.png` **reddedilir**. |
 | A8 | Hata kodları | JPEG değil → 400, 5MB üstü → 413, dosya yok → 400, e-posta zaten kayıtlı → 409, hatalı login → 401 (genel mesaj). |
-| A9 | Dosya adı | Diskte `<uuid>.jpg` olarak saklanır. `fileName` orijinal ad, `filePath` sunucudaki göreli yoldur. `filePath` API yanıtlarında **gösterilmez**. |
-| A10 | Yanıt şekli | `passwordHash` hiçbir yanıtta dönmez. `allowedUserIds` yalnızca sahibe gösterilir. |
-| A11 | Permissions body | `{ "userId": "<ObjectId>", "action": "add" \| "remove" }`. `add` idempotenttir (`$addToSet`). Hedef kullanıcı yoksa 404, sahip kendine izin veremez (400). |
-| A12 | Silme | `DELETE /media/:id` hem DB kaydını hem diskteki dosyayı siler. Yanıt 204. |
+| A9 | Dosya adı | Diskte **kullanıcı başına klasörde** `<UPLOAD_DIR>/<userId>/<uuid>.jpg` olarak saklanır *(T4'te güncellendi)*. `filePath` bu dosyanın `UPLOAD_DIR`'e göre göreli yoludur (`<userId>/<uuid>.jpg`) ve API yanıtlarında **gösterilmez**. Dosya önce bellekte doğrulanır, sonra diske yazılır; DB kaydı başarısız olursa dosya silinir. `fileName` orijinal addır: multipart'tan UTF-8 okunur (`fotoğraf.jpg` bozulmaz) ve kaydedilmeden önce temizlenir — yol parçaları atılır (yalnızca son kısım), kontrol ve görünmez yön karakterleri silinir, NFC'ye normalize edilir, baş/son boşluk kırpılır, 255 karaktere kısaltılır (uzantı korunur), boş kalırsa `image.jpg`. İndirmede `Content-Disposition` RFC 6266'ya göre kodlanır (`filename*=UTF-8''...`). |
+| A10 | Yanıt şekli | `passwordHash` hiçbir yanıtta dönmez. `allowedUserIds` yalnızca **sahibe** gösterilir (izinli kullanıcılar ve admin görmez). Yanıtlar alanları açıkça seçen DTO'larla üretilir, `filePath` hiç dönmez. |
+| A11 | Permissions body | `{ "userId": "<ObjectId>", "action": "add" \| "remove" }`. `userId` 24 haneli hex değilse veya `action` geçersizse 400. `add` idempotenttir (`$addToSet`); hedef kullanıcı yoksa 404. `remove` de idempotenttir (`$pull`) ve *(T6'da netleşti)* hedef kullanıcının var olmasını **istemez**: silinmiş bir kullanıcı da listeden çıkarılabilir. Sahip kendine izin veremez / kendini çıkaramaz (400). Sahip kontrolü ve güncelleme tek atomik işlemdir. İzinli kullanıcı sayısında üst sınır yoktur. |
+| A12 | Silme | `DELETE /media/:id` hem DB kaydını hem diskteki dosyayı siler. Yanıt 204. *(T6'da netleşti)* Sıra: önce kayıt (sahip kontrolüyle tek atomik işlem), sonra dosya. Dosya silinemezse hata loglanır ve yine 204 döner; en kötü durumda diskte kullanıcıya görünmeyen sahipsiz bir dosya kalır, "kaydı var dosyası yok" durumu oluşmaz. Boş kalan kullanıcı klasörü silinmez. |
 | A13 | Şifre kuralı | En az 8 karakter, en az bir harf ve bir rakam içerir. **En fazla 72 byte** olabilir: bcrypt 72 byte'tan sonrasını sessizce yok saydığı için daha uzun şifre register'da ve login'de 400 döner. Sınır karakter değil byte'tır (`ğ`, `ş` gibi harfler UTF-8'de 2 byte). bcrypt ile hash'lenir (cost 10). |
 | A14 | Health | `GET /health` auth gerektirmez, `{ status, db }` döner. DB bağlantısı yoksa 503. |
 | A15 | Testler | Testler Atlas'a değil `mongodb-memory-server` ile bellek içi Mongo'ya bağlanır. |
-| A16 | Rate limiting | *(Onaylandı)* `@nestjs/throttler` global guard olarak eklenir. Varsayılan limit IP başına 60 sn'de 100 istektir. `/auth/login`, `/auth/register` ve `/auth/refresh` için daha sıkı bir limit uygulanır: 60 sn'de 10 istek. Limit aşılınca 429 döner. Değerler env ile ayarlanabilir. `/health` limitten muaftır. Proxy arkasında doğru IP'yi almak için `TRUST_PROXY` env'i desteklenir. |
-| A17 | Docker | *(Onaylandı)* Multi-stage `Dockerfile` (`node:22-alpine`, root olmayan kullanıcı, sadece prod bağımlılıkları), `.dockerignore`, `docker-compose.yml` (`api` + `mongo` servisleri, `uploads` ve `mongo-data` volume'ları, `/health` üzerinden healthcheck). Compose varsayılan olarak yerel `mongo` konteynerine bağlanır. `.env` içinde `MONGO_URI` Atlas'ı gösterirse aynı image Atlas ile çalışır. Uygulama container'a hazırdır: `0.0.0.0` dinler, config yalnızca env'den gelir, SIGTERM'de düzgün kapanır (`enableShutdownHooks`), `UPLOAD_DIR` yoksa açılışta oluşturulur. |
+| A16 | Rate limiting | *(Onaylandı; T8'de netleşti)* `@nestjs/throttler` global guard olarak, kimlik doğrulamadan **önce** çalışır (token'sız istekler de sayılır, 429 401'den önce gelir). Sayaç **IP + endpoint** başınadır (paketin varsayılanı, bilerek korundu): her endpoint için IP başına 60 sn'de 100 istek. `/auth/login`, `/auth/register` ve `/auth/refresh` ayrıca `@AuthThrottle()` ile daha sıkı bir sayaca tabidir: her biri için IP başına 60 sn'de 10 istek. Limit aşılınca 429 `{ statusCode, message, error }` ve standart `Retry-After` başlığı döner. Değerler env ile ayarlanabilir (`THROTTLE_TTL`, `THROTTLE_LIMIT`, `THROTTLE_AUTH_LIMIT`). `/health` limitten muaftır. `TRUST_PROXY=true` ise istemci IP'si `X-Forwarded-For`'dan alınır (tek proxy katmanı); proxy yokken açmak limitin atlatılmasına yol açar, varsayılan `false`. Sayaçlar bellektedir (süreç başına). |
+| A17 | Docker | *(Onaylandı)* Multi-stage `Dockerfile` (`node:22-alpine`, root olmayan kullanıcı, sadece prod bağımlılıkları), `.dockerignore`, `docker-compose.yml` (`api` + `mongo` servisleri, `uploads` ve `mongo-data` volume'ları, `/health` üzerinden healthcheck). Compose varsayılan olarak yerel `mongo` konteynerine bağlanır. `.env` içinde `MONGO_URI` Atlas'ı gösterirse aynı image Atlas ile çalışır. Uygulama container'a hazırdır: `0.0.0.0` dinler, config yalnızca env'den gelir, SIGTERM'de düzgün kapanır (`enableShutdownHooks`), `UPLOAD_DIR` yoksa açılışta oluşturulur. *(T10'da netleşti)* Compose'da `MONGO_URI` her zaman `DOCKER_MONGO_URI` (varsayılan `mongodb://mongo:27017/media-library`) ile ezilir; Atlas için `.env`'e `DOCKER_MONGO_URI` yazılır (`.env`'deki `MONGO_URI` yerel çalıştırma içindir, konteynerde `localhost` geçersizdir). Compose'daki mongo host'a port açmaz (yalnızca iç ağ); API portu `API_PORT` (varsayılan 3000). Konteyner `init: true` ile çalışır, `bcrypt` Alpine için hazır derlenmiş gelir (derleme araçları gerekmez). Admin: `docker compose exec api npm run seed:admin`. `package-lock.json`'ın Linux'ta `npm ci` ile kurulabilmesi için `@emnapi/core` ve `@emnapi/runtime` açıkça devDependency'dir (Windows'ta üretilen lock bu peer'ları düşürüyordu). |
 | A18 | Database modülü | `src/database/` altında bağlantı modülü, ortak şema ayarları ve seed'ler bulunur. **Migration altyapısı ve soft delete (`deletedAt`) yoktur.** Mongo şemasız olduğu için şema migration'ı gerekmez. Index'ler Mongoose şemasında tanımlanır ve geliştirmede `autoIndex` ile oluşur. Ortak alanlar base class ile değil, ortak `SchemaOptions` ile verilir. Veri dönüşümü gerekirse ileride `migrate-mongo` eklenebilir. |
 
 ## Teknoloji Yığını
@@ -101,7 +101,9 @@ ADMIN_PASSWORD=                # yalnızca seed:admin için
 
 **users**: `_id`, `email` (unique, lowercase), `passwordHash`, `role: 'user' | 'admin'` (varsayılan `user`), `createdAt`, `updatedAt`
 
-**media**: `_id`, `ownerId` (ref users, index), `fileName`, `filePath`, `mimeType`, `size`, `allowedUserIds: ObjectId[]` (varsayılan `[]`, index), `createdAt`
+**sessions**: `_id` (oturum id'si, token'larda `sid`), `userId` (ref users, index), `currentJti` (geçerli refresh token'ın id'si), `expiresAt` (TTL index: süresi dolunca MongoDB siler), `createdAt`, `updatedAt`. Token'ın kendisi saklanmaz.
+
+**media**: `_id`, `ownerId` (ref users, index), `fileName` (temizlenmiş orijinal ad), `filePath` (`<userId>/<uuid>.jpg`, `UPLOAD_DIR`'e göre göreli), `mimeType`, `size`, `allowedUserIds: ObjectId[]` (varsayılan `[]`, index), `createdAt`
 
 ## REST Uç Noktaları
 
@@ -110,12 +112,13 @@ ADMIN_PASSWORD=                # yalnızca seed:admin için
 | POST | `/auth/register` | – | herkes | 201 `{ user, accessToken, refreshToken }` | 400, 409 |
 | POST | `/auth/login` | – | herkes | 200 `{ accessToken, refreshToken }` | 400, 401 |
 | POST | `/auth/refresh` | refresh token (body) | herkes | 200 `{ accessToken, refreshToken }` | 400, 401 |
+| POST | `/auth/logout` | Bearer | giriş yapmış | 204 (bu oturum kapanır) | 401 |
 | GET | `/users/me` | Bearer | giriş yapmış | 200 `{ id, email, role, createdAt }` | 401 |
 | POST | `/media/upload` | Bearer | giriş yapmış | 201 medya | 400, 401, 413 |
-| GET | `/media/my` | Bearer | giriş yapmış | 200 medya[] | 401 |
-| GET | `/media/:id` | Bearer | sahip + izinli + admin | 200 medya meta | 400, 401, 403, 404 |
-| GET | `/media/:id/download` | Bearer | sahip + izinli + admin | 200 stream (`image/jpeg`, `Content-Disposition: attachment`) | 400, 401, 403, 404 |
-| DELETE | `/media/:id` | Bearer | sahip + admin | 204 | 400, 401, 403, 404 |
+| GET | `/media/my?page&limit` | Bearer | giriş yapmış | 200 `{ items: medya[], page, limit, total, totalPages }` | 400, 401 |
+| GET | `/media/:id` | Bearer | sahip + izinli | 200 medya meta | 400, 401, 403, 404 |
+| GET | `/media/:id/download` | Bearer | sahip + izinli | 200 stream (`image/jpeg`, `Content-Disposition: attachment`, `nosniff`, CSP sandbox, `no-store`) | 400, 401, 403, 404 |
+| DELETE | `/media/:id` | Bearer | sahip | 204 | 400, 401, 403, 404 |
 | GET | `/media/:id/permissions` | Bearer | sahip | 200 `{ mediaId, allowedUserIds }` | 400, 401, 403, 404 |
 | POST | `/media/:id/permissions` | Bearer | sahip | 200 `{ mediaId, allowedUserIds }` | 400, 401, 403, 404 |
 | GET | `/health` | – | herkes | 200 `{ status: 'ok', db: 'up' }` | 503 |
@@ -137,13 +140,13 @@ src/
     decorators/              → @CurrentUser()
     pipes/                   → ParseObjectIdPipe
   auth/                      → controller, service, dto, jwt strategy, JwtAuthGuard
+    sessions/                → session şeması + SessionsService (rotation, TTL)
   users/                     → schema, service, controller (/users/me)
   media/
     schemas/media.schema.ts
     dto/
-    guards/media-access.guard.ts   → sahip / izinli kontrolü (owner-only modu ile)
     media.controller.ts
-    media.service.ts
+    media.service.ts               → dosya bazlı erişim kuralı (sahip / izinli) burada
     media-storage.service.ts       → diske yazma, okuma stream'i, silme
   health/                    → /health
 test/                        → e2e testleri (supertest + mongodb-memory-server)
@@ -159,44 +162,50 @@ README.md                    → kurulum, env, cURL örnekleri, tasarım kararla
 
 - NestJS konvansiyonları: modül başına klasör, dosyalarda `kebab-case.type.ts`, sınıflarda `PascalCase`.
 - Prettier + ESLint (Nest CLI varsayılanları), tek tırnak, noktalı virgül.
-- İş kuralları service katmanında, erişim kuralları guard'da. Controller ince tutulur.
+- Kimlik doğrulama guard'da, biçim doğrulama pipe'ta, iş ve dosya bazlı erişim kuralları service'te. Controller ince tutulur.
 - Bütün DTO'lar `class-validator` ile doğrulanır ve `@ApiProperty` ile belgelenir.
 
+Erişim katmanları *(T5'te belirlendi)*: kimlik doğrulama guard'da, biçim doğrulama pipe'ta, dosya bazlı yetki service'te.
+
+```
+İstek → JwtAuthGuard (global)       token, imza, süre, oturum, kullanıcı   → 401
+      → ParseObjectIdPipe           :id 24 haneli hex mi? → Types.ObjectId → 400
+      → Controller (ince)
+      → MediaService                kayıt var mı?                          → 404
+                                    sahip mi / izinli mi?                  → 403
+```
+
 ```ts
-@Injectable()
-export class MediaAccessGuard implements CanActivate {
-  constructor(
-    private readonly mediaService: MediaService,
-    private readonly reflector: Reflector,
-  ) {}
+// Controller: pipe string'i Types.ObjectId'ye çevirir; service ObjectId aldığı için
+// pipe'ı unutmak derleme hatasıdır.
+@Get(':id')
+findOne(@Param('id', ParseObjectIdPipe) id: Types.ObjectId, @CurrentUser() user: AuthUser) {
+  return this.mediaService.findForViewer(id, user.id);
+}
 
-  async canActivate(ctx: ExecutionContext): Promise<boolean> {
-    const req = ctx.switchToHttp().getRequest();
-    const media = await this.mediaService.findByIdOrThrow(req.params.id); // 404
-    const ownerOnly = this.reflector.get<boolean>(OWNER_ONLY, ctx.getHandler());
-    const userId = req.user.sub;
-
-    const isOwner = media.ownerId.equals(userId);
-    const isAdmin = req.user.role === 'admin';
-    const isAllowed = media.allowedUserIds.some((id) => id.equals(userId));
-    if (isOwner || isAdmin || (!ownerOnly && isAllowed)) {
-      req.media = media; // controller'da tekrar sorgu yapılmaz
-      return true;
-    }
-    throw new ForbiddenException('You do not have access to this media');
-  }
+// MediaService: kural tek yerde. Rol kontrolü yoktur (A3).
+async findForViewer(id: Types.ObjectId, viewerId: string): Promise<MediaDocument> {
+  const media = await this.mediaModel.findById(id);
+  if (!media) throw new NotFoundException('Media not found');                    // 404
+  const isOwner = media.ownerId.equals(viewerId);
+  const isAllowed = media.allowedUserIds.some((u) => u.equals(viewerId));
+  if (!isOwner && !isAllowed) throw new ForbiddenException('You do not have access to this media'); // 403
+  return media;
 }
 ```
 
 ## Test Stratejisi
 
-- **Unit (Jest):** `AuthService` (hash, token üretimi, hatalı şifre), `MediaService` (izin ekleme/kaldırma kuralları), `MediaAccessGuard` (sahip / izinli / yabancı / owner-only), JPEG doğrulayıcı.
+- **Unit (Jest):** `AuthService` (hash, token üretimi, hatalı şifre), `MediaService` (izin ekleme/kaldırma kuralları), `MediaService` erişim kuralları (sahip / izinli / yabancı / admin), `ParseObjectIdPipe`, JPEG doğrulayıcı.
 - **E2E (Supertest + mongodb-memory-server, geçici upload klasörü):**
   - register → login → refresh → `/users/me`
-  - upload JPEG (201), PNG (400), 5MB üstü (413), token yok (401)
+  - refresh rotation: eski refresh token tekrar kullanılırsa 401 ve oturum kapanır (aynı oturumun access token'ı da 401). Logout sonrası refresh ve access token → 401. Diğer cihazın oturumu etkilenmez.
+  - upload JPEG (201), PNG (400), PNG içerikli sahte `.jpg` (400), dosya yok (400), 5MB üstü (413), token yok (401); dosya `UPLOAD_DIR/<userId>/<uuid>.jpg`'ye yazılır, Türkçe dosya adı bozulmaz
+  - `/media/my` yalnızca sahibin kayıtları, en yeni en üstte, sayfalama ve geçersiz `page`/`limit` → 400
   - A kullanıcısı yükler, B → 403. A, B'ye izin verir, B indirir (200, byte'lar aynı). A izni kaldırır, B → 403
   - B (izinli) silmeye çalışır → 403, permissions görmeye çalışır → 403
-  - Admin, A'nın medyasını görür/indirir/siler → 200/204. Admin, A'nın permissions'ına erişir → 403
+  - Admin (sahip ya da izinli değil) A'nın medyasını görmeye/indirmeye/silmeye ya da permissions'ına erişmeye çalışır → 403
+  - indirme başlıkları: `image/jpeg`, `attachment` + RFC 6266 dosya adı, `nosniff`, CSP sandbox, `no-store`; kayıt var ama dosya diskte yok → 404
   - var olmayan id → 404, bozuk id → 400
   - `/uploads/...` yolu → 404 (statik servis yok)
   - auth limiti aşılınca → 429
@@ -213,12 +222,12 @@ export class MediaAccessGuard implements CanActivate {
 ## Başarı Kriterleri
 
 1. `npm run build`, `npm run lint`, `npm test` ve `npm run test:e2e` hatasız geçer.
-2. Case'teki 12 endpoint'in hepsi çalışır ve Swagger'da görünür. Auth gerektirenler `@ApiBearerAuth()` ile işaretlidir, 401/403/404 yanıtları belgelenmiştir. Swagger UI'daki "Authorize" butonu ile token girilip istekler denenebilir.
+2. Case'teki 12 endpoint ve eklenen `POST /auth/logout` çalışır ve Swagger'da görünür. Auth gerektirenler `@ApiBearerAuth()` ile işaretlidir, 401/403/404 yanıtları belgelenmiştir. Swagger UI'daki "Authorize" butonu ile token girilip istekler denenebilir.
 3. Yalnızca JPEG ve ≤ 5MB dosya kabul edilir. Dosya `UPLOAD_DIR` altına yazılır ve `media` kaydı oluşturulur.
 4. Yetkisiz kullanıcı, var olan bir medyaya erişirken 403 alır. İzin eklendikten sonra 200, kaldırıldıktan sonra yine 403 alır.
 5. Diskteki dosyaya controller dışında hiçbir URL ile erişilemez.
 6. `.env.example` ve README ile repo, yalnızca Atlas URI'si ve secret'lar girilerek çalıştırılabilir.
-7. Admin her medyayı görüntüleyip silebilir, izin yönetimine ise erişemez.
+7. Admin dahil hiç kimse, sahibi ya da izinli değilse bir medyaya erişemez.
 8. Rate limit aşılınca 429 döner.
 9. `docker compose up --build` tek komutla API + Mongo'yu ayağa kaldırır, `/health` 200 döner, upload'lar volume'da kalıcıdır. Aynı image, `MONGO_URI` Atlas'a verilerek de çalışır.
 
