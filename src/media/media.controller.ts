@@ -25,12 +25,14 @@ import {
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiParam,
   ApiPayloadTooLargeResponse,
-  ApiProduces,
   ApiTags,
+  ApiTooManyRequestsResponse,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { ErrorResponseDto } from '../common/dto/error-response.dto';
 import type { Response } from 'express';
 import { Types } from 'mongoose';
 import type { AuthUser } from '../auth/auth.types';
@@ -73,7 +75,15 @@ const DOWNLOAD_HEADERS = {
 
 @ApiTags('media')
 @ApiBearerAuth()
-@ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
+@ApiUnauthorizedResponse({
+  type: ErrorResponseDto,
+  description: 'Missing or invalid access token',
+})
+@ApiTooManyRequestsResponse({
+  type: ErrorResponseDto,
+  description:
+    'Rate limit exceeded (100/min per IP and endpoint). See Retry-After.',
+})
 @Controller('media')
 export class MediaController {
   constructor(private readonly mediaService: MediaService) {}
@@ -84,6 +94,7 @@ export class MediaController {
    * file (400) and checks it is a real JPEG (400) before anything hits disk.
    */
   @Post('upload')
+  @ApiOperation({ summary: 'Upload a JPEG (max 5 MB)' })
   @UseInterceptors(FileInterceptor('file'))
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -101,9 +112,13 @@ export class MediaController {
   })
   @ApiCreatedResponse({ type: MediaResponseDto })
   @ApiBadRequestResponse({
+    type: ErrorResponseDto,
     description: 'No file, more than one file, or not a JPEG',
   })
-  @ApiPayloadTooLargeResponse({ description: 'File larger than 5 MB' })
+  @ApiPayloadTooLargeResponse({
+    type: ErrorResponseDto,
+    description: 'File larger than 5 MB',
+  })
   async upload(
     @UploadedFile(
       new ParseFilePipe({
@@ -121,11 +136,15 @@ export class MediaController {
   // Must stay declared before the ':id' routes, or '/media/my' would match ':id'
   // and be rejected by ParseObjectIdPipe as an invalid id.
   @Get('my')
+  @ApiOperation({ summary: 'List my own media, newest first (paginated)' })
   @ApiOkResponse({
     type: MediaPageDto,
     description: "Only the caller's own media, newest first",
   })
-  @ApiBadRequestResponse({ description: 'Invalid page or limit' })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'Invalid page or limit',
+  })
   async my(
     @Query() { page, limit }: PaginationQueryDto,
     @CurrentUser() user: AuthUser,
@@ -145,13 +164,18 @@ export class MediaController {
   }
 
   @Get(':id')
+  @ApiOperation({ summary: 'Media details (owner or allowed user)' })
   @ApiMediaId()
   @ApiOkResponse({ type: MediaResponseDto })
-  @ApiBadRequestResponse({ description: 'Invalid id' })
+  @ApiBadRequestResponse({ type: ErrorResponseDto, description: 'Invalid id' })
   @ApiForbiddenResponse({
+    type: ErrorResponseDto,
     description: 'Neither the owner nor an allowed user',
   })
-  @ApiNotFoundResponse({ description: 'Media not found' })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'Media not found',
+  })
   async findOne(
     @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
     @CurrentUser() user: AuthUser,
@@ -161,18 +185,28 @@ export class MediaController {
   }
 
   @Get(':id/download')
+  @ApiOperation({
+    summary: 'Download the original file (owner or allowed user)',
+  })
   @ApiMediaId()
-  @ApiProduces('image/jpeg')
+  // The JPEG type goes on the 200 response only: @ApiProduces would also label
+  // the JSON error bodies (400/403/404) as image/jpeg.
   @ApiOkResponse({
     description:
       'The original JPEG as an attachment, named after the original file',
-    schema: { type: 'string', format: 'binary' },
+    content: {
+      'image/jpeg': { schema: { type: 'string', format: 'binary' } },
+    },
   })
-  @ApiBadRequestResponse({ description: 'Invalid id' })
+  @ApiBadRequestResponse({ type: ErrorResponseDto, description: 'Invalid id' })
   @ApiForbiddenResponse({
+    type: ErrorResponseDto,
     description: 'Neither the owner nor an allowed user',
   })
-  @ApiNotFoundResponse({ description: 'Media (or its file) not found' })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'Media (or its file) not found',
+  })
   async download(
     @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
     @CurrentUser() user: AuthUser,
@@ -191,14 +225,19 @@ export class MediaController {
   }
 
   @Delete(':id')
+  @ApiOperation({ summary: 'Delete media and its file (owner only)' })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiMediaId()
   @ApiNoContentResponse({ description: 'Record and file deleted' })
-  @ApiBadRequestResponse({ description: 'Invalid id' })
+  @ApiBadRequestResponse({ type: ErrorResponseDto, description: 'Invalid id' })
   @ApiForbiddenResponse({
+    type: ErrorResponseDto,
     description: 'Not the owner (allowed users may only view)',
   })
-  @ApiNotFoundResponse({ description: 'Media not found' })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'Media not found',
+  })
   remove(
     @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
     @CurrentUser() user: AuthUser,
@@ -207,11 +246,18 @@ export class MediaController {
   }
 
   @Get(':id/permissions')
+  @ApiOperation({ summary: 'Who may view this media (owner only)' })
   @ApiMediaId()
   @ApiOkResponse({ type: PermissionsResponseDto })
-  @ApiBadRequestResponse({ description: 'Invalid id' })
-  @ApiForbiddenResponse({ description: 'Not the owner' })
-  @ApiNotFoundResponse({ description: 'Media not found' })
+  @ApiBadRequestResponse({ type: ErrorResponseDto, description: 'Invalid id' })
+  @ApiForbiddenResponse({
+    type: ErrorResponseDto,
+    description: 'Not the owner',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'Media not found',
+  })
   async permissions(
     @Param('id', ParseObjectIdPipe) id: Types.ObjectId,
     @CurrentUser() user: AuthUser,
@@ -221,6 +267,7 @@ export class MediaController {
   }
 
   @Post(':id/permissions')
+  @ApiOperation({ summary: 'Grant or revoke view access (owner only)' })
   @HttpCode(HttpStatus.OK)
   @ApiMediaId()
   @ApiOkResponse({
@@ -228,11 +275,16 @@ export class MediaController {
     description: 'The updated list; add and remove are idempotent',
   })
   @ApiBadRequestResponse({
+    type: ErrorResponseDto,
     description:
       'Invalid id, userId or action, or the owner targeting themselves',
   })
-  @ApiForbiddenResponse({ description: 'Not the owner' })
+  @ApiForbiddenResponse({
+    type: ErrorResponseDto,
+    description: 'Not the owner',
+  })
   @ApiNotFoundResponse({
+    type: ErrorResponseDto,
     description: 'Media not found, or (on add) user not found',
   })
   async updatePermissions(

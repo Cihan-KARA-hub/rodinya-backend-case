@@ -3,10 +3,19 @@ import { UserResponseDto } from '../../users/dto/user-response.dto';
 import { TokenPair } from '../auth.types';
 
 export class TokenPairDto implements TokenPair {
-  @ApiProperty({ description: 'Bearer token for API calls (15 min)' })
+  @ApiProperty({
+    description: 'Bearer token for API calls (15 min)',
+    example:
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2NzA2ZjFjMmE0YjVlOGQ5ZjAxMjM0NTYifQ.signature',
+  })
   accessToken!: string;
 
-  @ApiProperty({ description: 'Used to get a new token pair (7 days)' })
+  @ApiProperty({
+    description:
+      'Used once to get a new token pair via POST /auth/refresh (7 days)',
+    example:
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2NzA2ZjFjMmE0YjVlOGQ5ZjAxMjM0NTYifQ.signature',
+  })
   refreshToken!: string;
 }
 

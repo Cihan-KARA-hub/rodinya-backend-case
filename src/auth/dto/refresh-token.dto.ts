@@ -6,6 +6,8 @@ export class RefreshTokenDto {
   // service's call, and every invalid token gets the same 401.
   @ApiProperty({
     description: 'The refreshToken from login, register or a previous refresh',
+    example:
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2NzA2ZjFjMmE0YjVlOGQ5ZjAxMjM0NTYifQ.signature',
   })
   @IsString()
   @IsNotEmpty()
