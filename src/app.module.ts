@@ -4,6 +4,7 @@ import { AuthModule } from './auth/auth.module';
 import { envValidationSchema } from './config/env.validation';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
+import { MediaModule } from './media/media.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { HealthModule } from './health/health.module';
     }),
     DatabaseModule,
     AuthModule,
+    MediaModule,
     HealthModule,
   ],
 })

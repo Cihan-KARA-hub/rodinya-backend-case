@@ -23,12 +23,12 @@ dosya bazında başka kullanıcılarla paylaşabildiği bir REST API.
 | A2 | Token süreleri | Access 15 dk, refresh 7 gün. İsteğe bağlı `JWT_ACCESS_EXPIRES_IN` / `JWT_REFRESH_EXPIRES_IN` env değişkenleriyle değiştirilebilir. |
 | A3 | `admin` rolü | *(Onaylandı)* Admin **her medyayı görüntüleyebilir, indirebilir ve silebilir**: `GET /media/:id`, `/download`, `DELETE`. İzin yönetimi (`GET`/`POST /permissions`) sahibe özel kalır. Kayıtla açılan her hesap `user` olur. Admin hesabı `npm run seed:admin` script'iyle oluşturulur; script `ADMIN_EMAIL` / `ADMIN_PASSWORD` env değişkenlerini okur ve idempotenttir. |
 | A4 | İzin kapsamı | İzinli kullanıcı yalnızca **görüntüleyebilir**: `GET /media/:id` ve `/download`. Silme sahip ve admin'e, izin yönetimi (`GET`/`POST /permissions`) yalnızca sahibe açıktır. |
-| A5 | `GET /media/my` | Sadece kullanıcının **sahibi olduğu** medyalar listelenir (paylaşılanlar dahil değildir). |
+| A5 | `GET /media/my` | Sadece kullanıcının **sahibi olduğu** medyalar listelenir (paylaşılanlar dahil değildir). En yeni en üstte. **Sayfalı** *(T4'te eklendi)*: `?page=1&limit=20` (varsayılan 1 / 20, `limit` en fazla 100); geçersiz değer → 400. Yanıt `{ items, page, limit, total, totalPages }`. |
 | A6 | 404 ve 403 ayrımı | Kayıt yoksa 404, kayıt var ama erişim yoksa 403 döner (case 403 istiyor). Geçersiz ObjectId → 400. |
 | A7 | JPEG doğrulama | Hem `mimetype === image/jpeg` hem de dosyanın ilk byte'ları (`FF D8 FF`) kontrol edilir. Örnek cURL'deki `image.png` **reddedilir**. |
 | A8 | Hata kodları | JPEG değil → 400, 5MB üstü → 413, dosya yok → 400, e-posta zaten kayıtlı → 409, hatalı login → 401 (genel mesaj). |
-| A9 | Dosya adı | Diskte `<uuid>.jpg` olarak saklanır. `fileName` orijinal ad, `filePath` sunucudaki göreli yoldur. `filePath` API yanıtlarında **gösterilmez**. |
-| A10 | Yanıt şekli | `passwordHash` hiçbir yanıtta dönmez. `allowedUserIds` yalnızca sahibe gösterilir. |
+| A9 | Dosya adı | Diskte **kullanıcı başına klasörde** `<UPLOAD_DIR>/<userId>/<uuid>.jpg` olarak saklanır *(T4'te güncellendi)*. `filePath` bu dosyanın `UPLOAD_DIR`'e göre göreli yoludur (`<userId>/<uuid>.jpg`) ve API yanıtlarında **gösterilmez**. Dosya önce bellekte doğrulanır, sonra diske yazılır; DB kaydı başarısız olursa dosya silinir. `fileName` orijinal addır: multipart'tan UTF-8 okunur (`fotoğraf.jpg` bozulmaz) ve kaydedilmeden önce temizlenir — yol parçaları atılır (yalnızca son kısım), kontrol ve görünmez yön karakterleri silinir, NFC'ye normalize edilir, baş/son boşluk kırpılır, 255 karaktere kısaltılır (uzantı korunur), boş kalırsa `image.jpg`. İndirmede `Content-Disposition` RFC 6266'ya göre kodlanır (`filename*=UTF-8''...`). |
+| A10 | Yanıt şekli | `passwordHash` hiçbir yanıtta dönmez. `allowedUserIds` yalnızca **sahibe ve admin'e** gösterilir *(T4'te güncellendi; izinli kullanıcılar görmez)*. Yanıtlar alanları açıkça seçen DTO'larla üretilir, `filePath` hiç dönmez. |
 | A11 | Permissions body | `{ "userId": "<ObjectId>", "action": "add" \| "remove" }`. `add` idempotenttir (`$addToSet`). Hedef kullanıcı yoksa 404, sahip kendine izin veremez (400). |
 | A12 | Silme | `DELETE /media/:id` hem DB kaydını hem diskteki dosyayı siler. Yanıt 204. |
 | A13 | Şifre kuralı | En az 8 karakter, en az bir harf ve bir rakam içerir. **En fazla 72 byte** olabilir: bcrypt 72 byte'tan sonrasını sessizce yok saydığı için daha uzun şifre register'da ve login'de 400 döner. Sınır karakter değil byte'tır (`ğ`, `ş` gibi harfler UTF-8'de 2 byte). bcrypt ile hash'lenir (cost 10). |
@@ -103,7 +103,7 @@ ADMIN_PASSWORD=                # yalnızca seed:admin için
 
 **sessions**: `_id` (oturum id'si, token'larda `sid`), `userId` (ref users, index), `currentJti` (geçerli refresh token'ın id'si), `expiresAt` (TTL index: süresi dolunca MongoDB siler), `createdAt`, `updatedAt`. Token'ın kendisi saklanmaz.
 
-**media**: `_id`, `ownerId` (ref users, index), `fileName`, `filePath`, `mimeType`, `size`, `allowedUserIds: ObjectId[]` (varsayılan `[]`, index), `createdAt`
+**media**: `_id`, `ownerId` (ref users, index), `fileName` (temizlenmiş orijinal ad), `filePath` (`<userId>/<uuid>.jpg`, `UPLOAD_DIR`'e göre göreli), `mimeType`, `size`, `allowedUserIds: ObjectId[]` (varsayılan `[]`, index), `createdAt`
 
 ## REST Uç Noktaları
 
@@ -115,7 +115,7 @@ ADMIN_PASSWORD=                # yalnızca seed:admin için
 | POST | `/auth/logout` | Bearer | giriş yapmış | 204 (bu oturum kapanır) | 401 |
 | GET | `/users/me` | Bearer | giriş yapmış | 200 `{ id, email, role, createdAt }` | 401 |
 | POST | `/media/upload` | Bearer | giriş yapmış | 201 medya | 400, 401, 413 |
-| GET | `/media/my` | Bearer | giriş yapmış | 200 medya[] | 401 |
+| GET | `/media/my?page&limit` | Bearer | giriş yapmış | 200 `{ items: medya[], page, limit, total, totalPages }` | 400, 401 |
 | GET | `/media/:id` | Bearer | sahip + izinli + admin | 200 medya meta | 400, 401, 403, 404 |
 | GET | `/media/:id/download` | Bearer | sahip + izinli + admin | 200 stream (`image/jpeg`, `Content-Disposition: attachment`) | 400, 401, 403, 404 |
 | DELETE | `/media/:id` | Bearer | sahip + admin | 204 | 400, 401, 403, 404 |
@@ -198,7 +198,8 @@ export class MediaAccessGuard implements CanActivate {
 - **E2E (Supertest + mongodb-memory-server, geçici upload klasörü):**
   - register → login → refresh → `/users/me`
   - refresh rotation: eski refresh token tekrar kullanılırsa 401 ve oturum kapanır (aynı oturumun access token'ı da 401). Logout sonrası refresh ve access token → 401. Diğer cihazın oturumu etkilenmez.
-  - upload JPEG (201), PNG (400), 5MB üstü (413), token yok (401)
+  - upload JPEG (201), PNG (400), PNG içerikli sahte `.jpg` (400), dosya yok (400), 5MB üstü (413), token yok (401); dosya `UPLOAD_DIR/<userId>/<uuid>.jpg`'ye yazılır, Türkçe dosya adı bozulmaz
+  - `/media/my` yalnızca sahibin kayıtları, en yeni en üstte, sayfalama ve geçersiz `page`/`limit` → 400
   - A kullanıcısı yükler, B → 403. A, B'ye izin verir, B indirir (200, byte'lar aynı). A izni kaldırır, B → 403
   - B (izinli) silmeye çalışır → 403, permissions görmeye çalışır → 403
   - Admin, A'nın medyasını görür/indirir/siler → 200/204. Admin, A'nın permissions'ına erişir → 403
