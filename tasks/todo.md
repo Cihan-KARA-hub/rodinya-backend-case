@@ -47,7 +47,7 @@ Plan: [`plan.md`](plan.md) · Spec: [`SPEC.md`](../SPEC.md)
 
 ## Faz 3: Ekstralar
 
-- [ ] **T7: Admin**
+- [x] **T7: Admin**
   - Kabul: `npm run seed:admin` `ADMIN_EMAIL`/`ADMIN_PASSWORD` ile admin oluşturuyor ya da var olan kaydı güncelliyor (idempotent). Admin'in medya üzerinde global yetkisi yok (A3): sahip ya da izinli değilse başkasının medyasını görmeye, indirmeye, silmeye ve permissions'a erişmeye çalışınca → 403. Token payload'ında `role` var.
   - Doğrula: e2e (admin → 403 senaryosu), script'i yerelde bir kez çalıştırma
   - Dosyalar: `src/database/seeds/seed-admin.ts`, `package.json`, `test/admin.e2e-spec.ts`
