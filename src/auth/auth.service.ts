@@ -13,9 +13,8 @@ import {
   RefreshTokenPayload,
   TokenPair,
 } from './auth.types';
+import { hashPassword } from './password';
 import { SessionsService } from './sessions/sessions.service';
-
-const BCRYPT_COST = 10; // SPEC A13
 
 /**
  * Compared against when the email is unknown, so a missing user costs the same
@@ -46,7 +45,7 @@ export class AuthService {
     email: string,
     password: string,
   ): Promise<{ user: UserDocument } & TokenPair> {
-    const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
+    const passwordHash = await hashPassword(password);
     const user = await this.usersService.create(email, passwordHash);
     return { user, ...(await this.startSession(user)) };
   }

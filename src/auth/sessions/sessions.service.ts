@@ -75,6 +75,14 @@ export class SessionsService {
     return session !== null;
   }
 
+  /** Logs a user out everywhere, e.g. after their password was reset. */
+  async revokeAllForUser(userId: string): Promise<number> {
+    const { deletedCount } = await this.sessionModel
+      .deleteMany({ userId })
+      .exec();
+    return deletedCount;
+  }
+
   async revoke(sessionId: string): Promise<void> {
     await this.sessionModel.deleteOne({ _id: sessionId }).exec();
   }
