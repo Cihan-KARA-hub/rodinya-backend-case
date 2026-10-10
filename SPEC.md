@@ -31,7 +31,7 @@ dosya bazında başka kullanıcılarla paylaşabildiği bir REST API.
 | A10 | Yanıt şekli | `passwordHash` hiçbir yanıtta dönmez. `allowedUserIds` yalnızca sahibe gösterilir. |
 | A11 | Permissions body | `{ "userId": "<ObjectId>", "action": "add" \| "remove" }`. `add` idempotenttir (`$addToSet`). Hedef kullanıcı yoksa 404, sahip kendine izin veremez (400). |
 | A12 | Silme | `DELETE /media/:id` hem DB kaydını hem diskteki dosyayı siler. Yanıt 204. |
-| A13 | Şifre kuralı | En az 8 karakter, en az bir harf ve bir rakam içerir. bcrypt ile hash'lenir (cost 10). |
+| A13 | Şifre kuralı | En az 8 karakter, en az bir harf ve bir rakam içerir. **En fazla 72 byte** olabilir: bcrypt 72 byte'tan sonrasını sessizce yok saydığı için daha uzun şifre register'da ve login'de 400 döner. Sınır karakter değil byte'tır (`ğ`, `ş` gibi harfler UTF-8'de 2 byte). bcrypt ile hash'lenir (cost 10). |
 | A14 | Health | `GET /health` auth gerektirmez, `{ status, db }` döner. DB bağlantısı yoksa 503. |
 | A15 | Testler | Testler Atlas'a değil `mongodb-memory-server` ile bellek içi Mongo'ya bağlanır. |
 | A16 | Rate limiting | *(Onaylandı)* `@nestjs/throttler` global guard olarak eklenir. Varsayılan limit IP başına 60 sn'de 100 istektir. `/auth/login`, `/auth/register` ve `/auth/refresh` için daha sıkı bir limit uygulanır: 60 sn'de 10 istek. Limit aşılınca 429 döner. Değerler env ile ayarlanabilir. `/health` limitten muaftır. Proxy arkasında doğru IP'yi almak için `TRUST_PROXY` env'i desteklenir. |
