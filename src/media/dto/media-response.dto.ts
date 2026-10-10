@@ -1,6 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { AuthUser } from '../../auth/auth.types';
-import { Role } from '../../users/schemas/user.schema';
 import { MediaDocument } from '../schemas/media.schema';
 
 /** Public shape of a media record. `filePath` is never part of it (SPEC A9). */
@@ -22,14 +21,17 @@ export class MediaResponseDto {
 
   @ApiPropertyOptional({
     type: [String],
-    description: 'Only shown to the owner and to admins (SPEC A10)',
+    description: 'Only shown to the owner (SPEC A10)',
   })
   allowedUserIds?: string[];
 
   @ApiProperty()
   createdAt!: Date;
 
-  /** Picks fields explicitly; `viewer` decides whether allowedUserIds is shown. */
+  /**
+   * Picks fields explicitly. allowedUserIds is shown to the owner only: not to
+   * allowed users, and not to admins, who have no global rights (SPEC A3, A10).
+   */
   static from(media: MediaDocument, viewer: AuthUser): MediaResponseDto {
     const ownerId = media.ownerId.toString();
     const dto: MediaResponseDto = {
@@ -40,7 +42,7 @@ export class MediaResponseDto {
       size: media.size,
       createdAt: media.createdAt,
     };
-    if (viewer.id === ownerId || viewer.role === Role.Admin) {
+    if (viewer.id === ownerId) {
       dto.allowedUserIds = media.allowedUserIds.map((id) => id.toString());
     }
     return dto;

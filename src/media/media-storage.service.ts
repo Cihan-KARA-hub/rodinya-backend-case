@@ -2,8 +2,9 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { createReadStream, ReadStream } from 'fs';
-import { access, mkdir, unlink, writeFile } from 'fs/promises';
+import { mkdir, stat, unlink, writeFile } from 'fs/promises';
 import { join, resolve, sep } from 'path';
+import { isObjectIdString } from '../common/utils/object-id';
 import { EnvVars } from '../config/env.validation';
 
 /**
@@ -32,8 +33,8 @@ export class MediaStorageService implements OnModuleInit {
   async save(userId: string, data: Buffer): Promise<string> {
     // The user id becomes a directory name, so it must be a plain 24-hex
     // ObjectId string; nothing else (e.g. '..') may reach the filesystem.
-    if (!/^[0-9a-f]{24}$/i.test(userId)) {
-      throw new Error(`Invalid owner id for storage: ${userId}`);
+    if (!isObjectIdString(userId)) {
+      throw new Error('Invalid owner id for storage');
     }
     await mkdir(join(this.root, userId), { recursive: true });
 
@@ -43,11 +44,16 @@ export class MediaStorageService implements OnModuleInit {
     return relativePath;
   }
 
-  /** Rejects with ENOENT if the file is gone. */
-  async openReadStream(relativePath: string): Promise<ReadStream> {
+  /**
+   * Opens a stored file for streaming, with its size on disk (for
+   * Content-Length). Rejects with ENOENT if the file is gone.
+   */
+  async open(
+    relativePath: string,
+  ): Promise<{ stream: ReadStream; size: number }> {
     const absolute = this.resolveInside(relativePath);
-    await access(absolute);
-    return createReadStream(absolute);
+    const { size } = await stat(absolute);
+    return { stream: createReadStream(absolute), size };
   }
 
   /** Idempotent: deleting a file that is already gone is not an error. */

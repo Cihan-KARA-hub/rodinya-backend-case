@@ -1,9 +1,9 @@
 import { getConnectionToken } from '@nestjs/mongoose';
 import { readFileSync } from 'fs';
 import { readFile, readdir, rm } from 'fs/promises';
-import { Connection } from 'mongoose';
+import { Connection, Types } from 'mongoose';
 import { join } from 'path';
-import request from 'supertest';
+import request, { Response } from 'supertest';
 import { TestApp, createTestApp } from './utils/test-app';
 
 const JPEG = readFileSync(join(__dirname, 'fixtures/photo.jpg'));
@@ -291,6 +291,187 @@ describe('Media upload & /media/my (e2e)', () => {
 
     it('requires a token (401)', async () => {
       await http().get('/media/my').expect(401);
+    });
+  });
+
+  describe('GET /media/:id and /media/:id/download', () => {
+    let carol: { token: string; id: string };
+    let admin: { token: string; id: string };
+    let mediaId: string;
+
+    const get = (path: string, token?: string) => {
+      const req = http().get(path);
+      return token ? req.set('Authorization', `Bearer ${token}`) : req;
+    };
+    const detail = (token: string, id = mediaId) => get(`/media/${id}`, token);
+    const download = (token: string, id = mediaId) =>
+      get(`/media/${id}/download`, token)
+        .buffer(true)
+        .parse((res, cb) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c: Buffer) => chunks.push(c));
+          res.on('end', () => cb(null, Buffer.concat(chunks)));
+        });
+    /** Error bodies of download() arrive as raw bytes, like the file would. */
+    const errorBody = (res: Response): unknown =>
+      Buffer.isBuffer(res.body) ? JSON.parse(res.body.toString()) : res.body;
+    const setAllowed = (ids: string[]) =>
+      db()
+        .collection('media')
+        .updateOne(
+          { _id: new Types.ObjectId(mediaId) },
+          { $set: { allowedUserIds: ids.map((id) => new Types.ObjectId(id)) } },
+        );
+
+    beforeEach(async () => {
+      carol = await signUp('carol@test.com');
+      admin = await signUp('admin@test.com');
+      // T7 adds seed:admin; promote directly for now.
+      await db()
+        .collection('users')
+        .updateOne({ email: 'admin@test.com' }, { $set: { role: 'admin' } });
+
+      const res = await upload(alice.token, JPEG, 'fotoğraf "tatil".jpg');
+      mediaId = (res.body as MediaBody).id;
+      // T6 adds the permissions endpoint; grant bob directly for now.
+      await setAllowed([bob.id]);
+    });
+
+    describe('who gets in', () => {
+      it('lets the owner see the details, including allowedUserIds', async () => {
+        const res = await detail(alice.token).expect(200);
+
+        expect(res.body).toMatchObject({
+          id: mediaId,
+          ownerId: alice.id,
+          fileName: 'fotoğraf "tatil".jpg',
+          allowedUserIds: [bob.id],
+        });
+        expect(res.body).not.toHaveProperty('filePath');
+      });
+
+      it('lets an allowed user see the details, without allowedUserIds', async () => {
+        const res = await detail(bob.token).expect(200);
+
+        expect(res.body).toMatchObject({ id: mediaId });
+        expect(res.body).not.toHaveProperty('allowedUserIds');
+      });
+
+      it('lets the owner and an allowed user download', async () => {
+        await download(alice.token).expect(200);
+        await download(bob.token).expect(200);
+      });
+
+      it.each([
+        ['a stranger', () => carol],
+        ['an admin who is neither owner nor allowed (SPEC A3)', () => admin],
+      ])('refuses %s with 403', async (_case, who) => {
+        const { token } = who();
+
+        for (const res of [await detail(token), await download(token)]) {
+          expect(res.status).toBe(403);
+          expect(errorBody(res)).toMatchObject({
+            message: 'You do not have access to this media',
+          });
+        }
+      });
+
+      it('refuses a user again once removed from the allowed list', async () => {
+        await setAllowed([]);
+
+        await detail(bob.token).expect(403);
+        await download(bob.token).expect(403);
+      });
+    });
+
+    describe('ids', () => {
+      it('answers 404 for an id that does not exist', async () => {
+        const missing = new Types.ObjectId().toString();
+
+        await detail(alice.token, missing).expect(404);
+        await download(alice.token, missing).expect(404);
+      });
+
+      it.each(['abc', 'aaaaaaaaaaaa', `${'f'.repeat(23)}g`])(
+        'answers 400 for the malformed id "%s"',
+        async (id) => {
+          await detail(alice.token, id).expect(400, {
+            message: 'Invalid id',
+            error: 'Bad Request',
+            statusCode: 400,
+          });
+          await download(alice.token, id).expect(400);
+        },
+      );
+
+      it('asks for a token before looking at the id (401, not 400)', async () => {
+        await get('/media/abc').expect(401);
+      });
+
+      it("keeps '/media/my' routed to the list, not to ':id'", async () => {
+        const res = await http()
+          .get('/media/my')
+          .set('Authorization', `Bearer ${alice.token}`)
+          .expect(200);
+
+        expect((res.body as MediaPage).total).toBe(1);
+      });
+    });
+
+    describe('download', () => {
+      let res: Response;
+
+      beforeEach(async () => {
+        res = await download(bob.token).expect(200);
+      });
+
+      it('returns the exact bytes that were uploaded', () => {
+        expect(Buffer.compare(res.body as Buffer, JPEG)).toBe(0);
+      });
+
+      it('sends it as a JPEG attachment named after the original file', () => {
+        expect(res.headers['content-type']).toBe('image/jpeg');
+        expect(res.headers['content-length']).toBe(String(JPEG.length));
+        expect(res.headers['content-disposition']).toBe(
+          `attachment; filename="foto?raf \\"tatil\\".jpg"; filename*=UTF-8''foto%C4%9Fraf%20%22tatil%22.jpg`,
+        );
+      });
+
+      it('sends the safety headers', () => {
+        expect(res.headers).toMatchObject({
+          'x-content-type-options': 'nosniff',
+          'content-security-policy': "default-src 'none'; sandbox",
+          'cache-control': 'private, no-store',
+        });
+      });
+
+      it('always declares image/jpeg, whatever the original name says', async () => {
+        const up = await upload(alice.token, JPEG, 'resim.png').expect(201);
+
+        const png = await download(
+          alice.token,
+          (up.body as MediaBody).id,
+        ).expect(200);
+
+        expect(png.headers['content-type']).toBe('image/jpeg');
+        expect(png.headers['content-disposition']).toBe(
+          'attachment; filename="resim.png"',
+        );
+      });
+
+      it('answers 404 when the record exists but its file is gone', async () => {
+        for (const file of await filesOnDisk()) {
+          await rm(join(testApp.uploadDir, file));
+        }
+
+        const gone = await download(alice.token).expect(404);
+
+        expect(errorBody(gone)).toMatchObject({
+          message: 'Media file not found',
+        });
+        // The record itself is still there.
+        await detail(alice.token).expect(200);
+      });
     });
   });
 

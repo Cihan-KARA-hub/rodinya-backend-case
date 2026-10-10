@@ -83,12 +83,12 @@ describe('MediaResponseDto.from', () => {
     ).toEqual([allowed.toString()]);
   });
 
-  it('shows allowedUserIds to an admin who is not the owner', () => {
+  it('hides allowedUserIds from an admin who is not the owner (SPEC A3)', () => {
     const admin = viewer(new Types.ObjectId().toString(), Role.Admin);
 
-    expect(MediaResponseDto.from(media, admin).allowedUserIds).toEqual([
-      allowed.toString(),
-    ]);
+    expect(MediaResponseDto.from(media, admin)).not.toHaveProperty(
+      'allowedUserIds',
+    );
   });
 
   it('hides allowedUserIds from anyone else, including allowed users', () => {

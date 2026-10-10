@@ -1,3 +1,4 @@
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MongooseModule, getModelToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -158,6 +159,58 @@ describe('MediaService', () => {
       await expect(
         service.findByOwner(new Types.ObjectId().toString(), 1, 20),
       ).resolves.toEqual({ items: [], total: 0 });
+    });
+  });
+
+  describe('findForViewer', () => {
+    const allowed = new Types.ObjectId().toString();
+    const stranger = new Types.ObjectId().toString();
+    let mediaId: Types.ObjectId;
+
+    beforeEach(async () => {
+      const media = await service.create(owner, upload());
+      mediaId = media._id;
+      // T6 adds the permissions endpoint; until then, grant directly.
+      await mediaModel.updateOne(
+        { _id: mediaId },
+        { $set: { allowedUserIds: [new Types.ObjectId(allowed)] } },
+      );
+    });
+
+    it('returns the record to its owner', async () => {
+      const media = await service.findForViewer(mediaId, owner);
+
+      expect(media._id.equals(mediaId)).toBe(true);
+    });
+
+    it('returns the record to a user the owner allowed', async () => {
+      await expect(
+        service.findForViewer(mediaId, allowed),
+      ).resolves.toBeDefined();
+    });
+
+    it('refuses anyone else with 403, admins included (no role check)', async () => {
+      // The service never sees a role: an admin is just another user id here.
+      await expect(service.findForViewer(mediaId, stranger)).rejects.toThrow(
+        new ForbiddenException('You do not have access to this media'),
+      );
+    });
+
+    it('stops working for a user once removed from the allowed list', async () => {
+      await mediaModel.updateOne(
+        { _id: mediaId },
+        { $set: { allowedUserIds: [] } },
+      );
+
+      await expect(service.findForViewer(mediaId, allowed)).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('answers 404 before 403 for a missing record', async () => {
+      await expect(
+        service.findForViewer(new Types.ObjectId(), stranger),
+      ).rejects.toThrow(new NotFoundException('Media not found'));
     });
   });
 });
