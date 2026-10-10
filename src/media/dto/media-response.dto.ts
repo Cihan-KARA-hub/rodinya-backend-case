@@ -22,10 +22,11 @@ export class MediaResponseDto {
   @ApiPropertyOptional({
     type: [String],
     description: 'Only shown to the owner (SPEC A10)',
+    example: ['6706f1c2a4b5e8d9f0123400'],
   })
   allowedUserIds?: string[];
 
-  @ApiProperty()
+  @ApiProperty({ example: '2026-10-10T12:00:00.000Z' })
   createdAt!: Date;
 
   /**

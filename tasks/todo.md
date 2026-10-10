@@ -57,7 +57,7 @@ Plan: [`plan.md`](plan.md) · Spec: [`SPEC.md`](../SPEC.md)
   - Doğrula: düşük limitli e2e (auth limiti → 429, 401'den önce 429, `/health` muaf, `TRUST_PROXY` açık/kapalı)
   - Dosyalar: `src/app.module.ts`, `src/app.setup.ts`, `src/common/throttle/*`, `src/common/decorators/auth-throttle.decorator.ts`, `src/auth/auth.controller.ts`, `src/health/health.controller.ts`, `test/throttle.e2e-spec.ts`, `test/utils/test-app.ts`
 
-- [ ] **T9: Swagger denetimi**
+- [x] **T9: Swagger denetimi**
   - Kabul: Bütün korumalı endpoint'lerde `@ApiBearerAuth()` var. 400/401/403/404/413/429 yanıtları belgelenmiş. Upload için `@ApiConsumes('multipart/form-data')` + dosya şeması tanımlı, download için binary yanıt belgelenmiş. DTO'larda örnek değerler var.
   - Doğrula: `/docs-json` üzerinde bütün yolları ve security'yi kontrol eden bir e2e testi + Swagger UI'da elle deneme
   - Dosyalar: controller'lar, DTO'lar, `test/swagger.e2e-spec.ts`

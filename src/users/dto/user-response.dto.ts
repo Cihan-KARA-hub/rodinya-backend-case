@@ -12,7 +12,7 @@ export class UserResponseDto {
   @ApiProperty({ enum: Role, example: Role.User })
   role!: Role;
 
-  @ApiProperty()
+  @ApiProperty({ example: '2026-10-10T12:00:00.000Z' })
   createdAt!: Date;
 
   /** Picks fields explicitly, so nothing new on the schema leaks by default. */
