@@ -84,9 +84,9 @@ docker compose down -v            # durdur ve verileri sil
 ```
 - İki servis açılır: `api` ve `mongo:7`. API, MongoDB sağlıklı olana kadar başlamaz.
 - Yüklenen dosyalar `uploads` volume'unda, veritabanı `mongo-data` volume'unda tutulur. **Konteyner yeniden başlasa da veriler kaybolmaz.**
-- Compose'daki MongoDB dışarıya port açmaz; yalnızca API ona erişir.
+- Compose'daki MongoDB'ye bu bilgisayardan `mongodb://localhost:27018/media-library` ile bağlanabilirsiniz (ör. MongoDB Compass). Port **yalnızca localhost'a** açılır, çünkü bu veritabanı şifresizdir ve ağdan erişilememelidir. Varsayılan port 27018'dir; böylece yerelde 27017'de çalışan bir MongoDB ile çakışmaz.
 - Konteynerde `.env`'deki `MONGO_URI` **kullanılmaz** (o, Docker dışında çalıştırmak içindir). Docker'da veritabanı `DOCKER_MONGO_URI` ile seçilir; varsayılanı compose'daki MongoDB'dir.
-- 3000 portu doluysa: `.env`'e `API_PORT=3001` yazın.
+- 3000 portu doluysa: `.env`'e `API_PORT=3001` yazın. 27018 doluysa: `.env`'e `MONGO_HOST_PORT=27019` yazın.
 
 ### 2c. MongoDB Atlas ile
 1. [Atlas](https://www.mongodb.com/cloud/atlas)'ta bir cluster açın (ücretsiz katman yeterli).
@@ -127,6 +127,7 @@ curl http://localhost:3000/health
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | yalnızca seed | – | `npm run seed:admin` için (uygulama kullanmaz) |
 | `DOCKER_MONGO_URI` | yalnızca Docker | compose'daki mongo | Docker'da kullanılacak veritabanı (ör. Atlas) |
 | `API_PORT` | yalnızca Docker | `3000` | Docker'da API'nin host portu |
+| `MONGO_HOST_PORT` | yalnızca Docker | `27018` | Compose'daki MongoDB'nin host portu (yalnızca `127.0.0.1`) |
 
 ---
 
