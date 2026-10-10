@@ -19,7 +19,7 @@ dosya bazında başka kullanıcılarla paylaşabildiği bir REST API.
 
 | # | Konu | Karar |
 |---|------|----------|
-| A1 | Refresh token | **Stateless** *(onaylandı)*: token ayrı secret ile imzalanır, `POST /auth/refresh` yeni access + refresh çifti döner. Veri modeli değişmez; DB'de token hash tutulmaz, bu yüzden iptal/rotasyon kontrolü yoktur. Access ve refresh token'ları payload'daki `type` alanıyla ayrılır, yani biri diğerinin yerine kullanılamaz. |
+| A1 | Refresh token | **Oturum tabanlı, rotation + çalınma tespiti** *(T3'te onaylandı; önceki stateless kararın yerine geçer)*. Her login/register bir `sessions` kaydı açar (cihaz başına bir oturum). Token'lar ayrı secret'larla imzalanır ve payload'daki `type` alanıyla ayrılır, biri diğerinin yerine kullanılamaz. Access token `sid`, refresh token `sid` + `jti` taşır. **Rotation:** `POST /auth/refresh` yalnızca oturumun güncel `jti`'sine sahip refresh token'ı kabul eder, yeni çift döner ve `currentJti`'yi değiştirir; eski refresh token anında geçersiz olur. **Çalınma tespiti:** eski (`jti`'si güncel olmayan) bir refresh token gelirse oturumun tamamı silinir ve 401 döner. **Logout:** `POST /auth/logout` oturumu siler. **Anında etki:** `JwtStrategy` her istekte oturumun hâlâ var olduğunu kontrol eder; logout veya çalınma tespitinden sonra o oturumun access token'ı da 401 alır. Her refresh oturumun süresini yeniden 7 gün uzatır (kayan oturum). Süresi dolan oturumları MongoDB TTL index'i siler. |
 | A2 | Token süreleri | Access 15 dk, refresh 7 gün. İsteğe bağlı `JWT_ACCESS_EXPIRES_IN` / `JWT_REFRESH_EXPIRES_IN` env değişkenleriyle değiştirilebilir. |
 | A3 | `admin` rolü | *(Onaylandı)* Admin **her medyayı görüntüleyebilir, indirebilir ve silebilir**: `GET /media/:id`, `/download`, `DELETE`. İzin yönetimi (`GET`/`POST /permissions`) sahibe özel kalır. Kayıtla açılan her hesap `user` olur. Admin hesabı `npm run seed:admin` script'iyle oluşturulur; script `ADMIN_EMAIL` / `ADMIN_PASSWORD` env değişkenlerini okur ve idempotenttir. |
 | A4 | İzin kapsamı | İzinli kullanıcı yalnızca **görüntüleyebilir**: `GET /media/:id` ve `/download`. Silme sahip ve admin'e, izin yönetimi (`GET`/`POST /permissions`) yalnızca sahibe açıktır. |
@@ -101,6 +101,8 @@ ADMIN_PASSWORD=                # yalnızca seed:admin için
 
 **users**: `_id`, `email` (unique, lowercase), `passwordHash`, `role: 'user' | 'admin'` (varsayılan `user`), `createdAt`, `updatedAt`
 
+**sessions**: `_id` (oturum id'si, token'larda `sid`), `userId` (ref users, index), `currentJti` (geçerli refresh token'ın id'si), `expiresAt` (TTL index: süresi dolunca MongoDB siler), `createdAt`, `updatedAt`. Token'ın kendisi saklanmaz.
+
 **media**: `_id`, `ownerId` (ref users, index), `fileName`, `filePath`, `mimeType`, `size`, `allowedUserIds: ObjectId[]` (varsayılan `[]`, index), `createdAt`
 
 ## REST Uç Noktaları
@@ -110,6 +112,7 @@ ADMIN_PASSWORD=                # yalnızca seed:admin için
 | POST | `/auth/register` | – | herkes | 201 `{ user, accessToken, refreshToken }` | 400, 409 |
 | POST | `/auth/login` | – | herkes | 200 `{ accessToken, refreshToken }` | 400, 401 |
 | POST | `/auth/refresh` | refresh token (body) | herkes | 200 `{ accessToken, refreshToken }` | 400, 401 |
+| POST | `/auth/logout` | Bearer | giriş yapmış | 204 (bu oturum kapanır) | 401 |
 | GET | `/users/me` | Bearer | giriş yapmış | 200 `{ id, email, role, createdAt }` | 401 |
 | POST | `/media/upload` | Bearer | giriş yapmış | 201 medya | 400, 401, 413 |
 | GET | `/media/my` | Bearer | giriş yapmış | 200 medya[] | 401 |
@@ -137,6 +140,7 @@ src/
     decorators/              → @CurrentUser()
     pipes/                   → ParseObjectIdPipe
   auth/                      → controller, service, dto, jwt strategy, JwtAuthGuard
+    sessions/                → session şeması + SessionsService (rotation, TTL)
   users/                     → schema, service, controller (/users/me)
   media/
     schemas/media.schema.ts
@@ -193,6 +197,7 @@ export class MediaAccessGuard implements CanActivate {
 - **Unit (Jest):** `AuthService` (hash, token üretimi, hatalı şifre), `MediaService` (izin ekleme/kaldırma kuralları), `MediaAccessGuard` (sahip / izinli / yabancı / owner-only), JPEG doğrulayıcı.
 - **E2E (Supertest + mongodb-memory-server, geçici upload klasörü):**
   - register → login → refresh → `/users/me`
+  - refresh rotation: eski refresh token tekrar kullanılırsa 401 ve oturum kapanır (aynı oturumun access token'ı da 401). Logout sonrası refresh ve access token → 401. Diğer cihazın oturumu etkilenmez.
   - upload JPEG (201), PNG (400), 5MB üstü (413), token yok (401)
   - A kullanıcısı yükler, B → 403. A, B'ye izin verir, B indirir (200, byte'lar aynı). A izni kaldırır, B → 403
   - B (izinli) silmeye çalışır → 403, permissions görmeye çalışır → 403
@@ -213,7 +218,7 @@ export class MediaAccessGuard implements CanActivate {
 ## Başarı Kriterleri
 
 1. `npm run build`, `npm run lint`, `npm test` ve `npm run test:e2e` hatasız geçer.
-2. Case'teki 12 endpoint'in hepsi çalışır ve Swagger'da görünür. Auth gerektirenler `@ApiBearerAuth()` ile işaretlidir, 401/403/404 yanıtları belgelenmiştir. Swagger UI'daki "Authorize" butonu ile token girilip istekler denenebilir.
+2. Case'teki 12 endpoint ve eklenen `POST /auth/logout` çalışır ve Swagger'da görünür. Auth gerektirenler `@ApiBearerAuth()` ile işaretlidir, 401/403/404 yanıtları belgelenmiştir. Swagger UI'daki "Authorize" butonu ile token girilip istekler denenebilir.
 3. Yalnızca JPEG ve ≤ 5MB dosya kabul edilir. Dosya `UPLOAD_DIR` altına yazılır ve `media` kaydı oluşturulur.
 4. Yetkisiz kullanıcı, var olan bir medyaya erişirken 403 alır. İzin eklendikten sonra 200, kaldırıldıktan sonra yine 403 alır.
 5. Diskteki dosyaya controller dışında hiçbir URL ile erişilemez.

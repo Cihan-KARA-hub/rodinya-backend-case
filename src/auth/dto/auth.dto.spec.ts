@@ -1,6 +1,7 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { LoginDto } from './login.dto';
+import { RefreshTokenDto } from './refresh-token.dto';
 import { RegisterDto } from './register.dto';
 
 async function failedFields<T extends object>(
@@ -61,5 +62,23 @@ describe('LoginDto', () => {
     await expect(
       failedFields(LoginDto, { email: 'ali@test.com', password }),
     ).resolves.toEqual(['password']);
+  });
+});
+
+describe('RefreshTokenDto', () => {
+  it('accepts any non-empty string (validity is checked by the service)', async () => {
+    await expect(
+      failedFields(RefreshTokenDto, { refreshToken: 'anything' }),
+    ).resolves.toEqual([]);
+  });
+
+  it.each([
+    ['missing', {}],
+    ['empty', { refreshToken: '' }],
+    ['not a string', { refreshToken: 123 }],
+  ])('rejects a refreshToken that is %s', async (_case, body) => {
+    await expect(failedFields(RefreshTokenDto, body)).resolves.toEqual([
+      'refreshToken',
+    ]);
   });
 });
