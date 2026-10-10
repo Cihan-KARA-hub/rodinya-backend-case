@@ -4,7 +4,7 @@ Plan: [`plan.md`](plan.md) · Spec: [`SPEC.md`](../SPEC.md)
 
 ## Faz 1: İskelet ve Kimlik
 
-- [ ] **T1: Proje iskeleti + health**
+- [x] **T1: Proje iskeleti + health**
   - Kabul: Nest 11 projesi kurulu. `ConfigModule` + Joi şeması (eksik env'de açılış hatası verir), `DatabaseModule` (`MongooseModule.forRootAsync` + ortak şema ayarları), global `ValidationPipe` (whitelist, transform), Swagger `/docs`'ta Bearer şemasıyla açılıyor. `GET /health` → `{status:'ok', db:'up'}`, DB yoksa 503. `.gitignore` (`.env`, `uploads/*`, `dist`, `node_modules`, `coverage`), `.env.example`, `uploads/.gitkeep` hazır. `enableShutdownHooks`, `0.0.0.0` dinleme yapılandırılmış.
   - Doğrula: `npm run build`, `npm run lint`, health e2e testi (mongodb-memory-server)
   - Dosyalar: `package.json`, `src/main.ts`, `src/app.module.ts`, `src/config/*`, `src/database/database.module.ts`, `src/database/base-schema.options.ts`, `src/health/*`, `test/health.e2e-spec.ts`
