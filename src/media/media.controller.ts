@@ -36,12 +36,19 @@ import { PaginationQueryDto } from './dto/pagination-query.dto';
 import { MediaService } from './media.service';
 import { JpegFileValidator } from './validators/jpeg-file.validator';
 
-/** Swagger docs shared by every `/media/:id...` route. */
+/**
+ * Swagger docs shared by every `/media/:id...` route. `type: String` is needed:
+ * the handler param is typed Types.ObjectId (what the pipe returns), and
+ * without it Swagger documents an object, which Swagger UI shows as a large
+ * empty JSON box instead of a plain text field.
+ */
 const ApiMediaId = () =>
   ApiParam({
     name: 'id',
-    description: 'Media id (24 hex characters)',
-    schema: { type: 'string', pattern: '^[0-9a-fA-F]{24}$' },
+    type: String,
+    description:
+      'Media id: the `id` returned by upload or /media/my (24 hex characters)',
+    example: '6706f1c2a4b5e8d9f0123456',
   });
 
 /**
