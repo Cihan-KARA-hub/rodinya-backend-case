@@ -14,12 +14,13 @@ import { EnvVars } from '../config/env.validation';
           uri: config.get('MONGO_URI', { infer: true }),
           // Indexes are declared on the schemas; no migration tooling (SPEC A18).
           autoIndex: true,
-          connectionFactory: (connection: Connection) => {
+          // Runs before the connection opens; connectionFactory runs after,
+          // by which time 'connected' has already fired and is never seen.
+          onConnectionCreate: (connection: Connection) => {
             connection.on('connected', () => logger.log('MongoDB connected'));
             connection.on('disconnected', () =>
               logger.warn('MongoDB disconnected'),
             );
-            return connection;
           },
         };
       },
